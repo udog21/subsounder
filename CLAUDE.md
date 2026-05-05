@@ -10,8 +10,7 @@ AI-powered subscription intelligence layer. Users forward subscription emails to
 | Platform | Cloudflare Workers via `@opennextjs/cloudflare` |
 | Database | Supabase (Postgres + Auth) |
 | LLM | OpenAI `gpt-4o-mini` with structured outputs (`json_schema`, `strict: true`) |
-| Email out | Resend |
-| Email in | Mailgun (`inbound.subsounder.com`) |
+| Email | Mailgun (inbound: `inbound.subsounder.com`; outbound: `mailgun.js`) |
 
 ## Key Architectural Decisions
 - **Two-layer logging:** `parser_runs` (control plane, one per attempt) → `soundings_log` (data plane, one row per extracted signal)
@@ -75,8 +74,8 @@ NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY
 MAILGUN_SIGNING_KEY
+MAILGUN_API_KEY
 OPENAI_API_KEY
-RESEND_API_KEY
 PARSE_SECRET
 CRON_SECRET
 WORKERS_URL

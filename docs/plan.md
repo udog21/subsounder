@@ -84,7 +84,7 @@ export default {
 - `next`: `^14.2.0` → `^15.x`
 - `@supabase/ssr`: `^0.1.0` → `^0.6.x` (validate CF compatibility; fallback documented above)
 - **Add:** `@opennextjs/cloudflare`, `wrangler` (dev dep), `openai`
-- **Add:** `resend` (email)
+- **Add:** `mailgun.js` (email — consolidates inbound and outbound under one vendor)
 
 ---
 
@@ -378,7 +378,7 @@ Flow:
 **`app/api/cron/renewal-reminders/route.ts`:**
 - Authenticated by `x-cron-secret` header
 - Query: `SELECT s.*, p.email, p.timezone FROM subscriptions s JOIN profiles p ON p.pod_id = s.pod_id WHERE s.next_renewal_at BETWEEN now() AND now() + interval '8 days' AND s.reminder_enabled = true AND s.status = 'active'`
-- For each: send renewal reminder email via Resend
+- For each: send renewal reminder email via Mailgun
 - Return `{ sent: N }`
 
 Cron schedules in `wrangler.toml`:
@@ -387,7 +387,7 @@ Cron schedules in `wrangler.toml`:
 
 ### Phase 5 — Notification Emails
 
-**`lib/email/index.ts`** — Resend client wrapper:
+**`lib/email/index.ts`** — Mailgun client wrapper:
 - `sendNewSubscriptionEmail(to, subscription)` — fires after parser writes a new subscription
 - `sendRenewalReminderEmail(to, subscription, daysUntilRenewal)` — fires from cron
 
@@ -449,7 +449,7 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 |---|---|---|
 | `wrangler.toml` | New | Cloudflare Workers config |
 | `src/worker.ts` | New | OpenNext wrapper + scheduled cron handler |
-| `package.json` | Modify | Next.js 15, @opennextjs/cloudflare, openai, resend |
+| `package.json` | Modify | Next.js 15, @opennextjs/cloudflare, openai, mailgun.js |
 | `app/api/mailgun/inbound/route.ts` | Modify | Fix 5 schema bugs, add `after()` parse trigger |
 | `app/api/parse/route.ts` | New | Parser orchestrator |
 | `lib/parser/normalize.ts` | New | Text normalization |
@@ -459,7 +459,7 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `lib/parse-trigger.ts` | New | Shared helper for calling /api/parse |
 | `app/api/cron/parse-sweep/route.ts` | New | Retry sweep for pending receipts |
 | `app/api/cron/renewal-reminders/route.ts` | New | Daily reminder dispatch |
-| `lib/email/index.ts` | New | Resend client + email templates |
+| `lib/email/index.ts` | New | Mailgun client + email templates |
 | `app/page.tsx` | Rewrite | Subscription catalog UI |
 | `supabase/migrations/20260505_000000_reboot_schema.sql` | New | Full schema DDL + removals + soundings_log |
 | `supabase/seed.sql` | New | Top 50 merchants seed data |
@@ -475,7 +475,7 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `SUPABASE_SERVICE_ROLE_KEY` | Server writes (bypasses RLS) |
 | `MAILGUN_SIGNING_KEY` | Webhook signature verification |
 | `OPENAI_API_KEY` | GPT-4 mini extraction |
-| `RESEND_API_KEY` | Outbound emails |
+| `MAILGUN_API_KEY` | Outbound emails (same account as inbound) |
 | `PARSE_SECRET` | Auth header for `/api/parse` |
 | `CRON_SECRET` | Auth header for cron routes |
 | `WORKERS_URL` | Base URL for internal fetches in `src/worker.ts` |
@@ -514,7 +514,7 @@ Local Supabase connection details are written to `.env.local` automatically by t
 - Full parse pipeline (call `/api/parse` directly with a receipt ID)
 - Cron sweep (call `/api/cron/parse-sweep` directly)
 - Database writes (query local Supabase to verify rows)
-- Email triggers (Resend test mode logs emails instead of sending)
+- Email triggers (Mailgun sandbox domain logs emails without delivering; or use a real domain with testmode flag)
 
 **What requires your eyes:**
 - The subscription catalog UI (open `http://localhost:3000` in browser)
@@ -547,7 +547,7 @@ Claude tests the backend end-to-end locally and reports results. You verify the 
 | 3 | POST `{ receipt_id, pod_id }` to `/api/parse` directly → `parser_runs` row written, `soundings_log` row(s) written, `subscriptions` row created with `display_name`/`amount`/`next_renewal_at`; receipt `parser_status = 'parsed'` |
 | 3b | POST same receipt_id again → returns `{ status: 'skipped' }`; no duplicate rows |
 | 4 | Trigger `/api/cron/parse-sweep` → pending receipts processed; check `parser_status` flips to `'parsed'` for each |
-| 4b | Set a subscription `next_renewal_at` to 3 days from now; trigger `/api/cron/renewal-reminders` → Resend email delivered to test inbox |
+| 4b | Set a subscription `next_renewal_at` to 3 days from now; trigger `/api/cron/renewal-reminders` → Mailgun email delivered to test inbox |
 | 5 | Parser writes new subscription → "new subscription detected" email delivered within 30 seconds |
 | 6 | Log in → dashboard shows subscription list with alias, amounts, renewal dates; empty state shows alias email; cancellation links visible for seeded merchants |
 | 7 | Forward a real Spotify renewal email to alias → end-to-end: receipt stored, parsed, subscription appears in dashboard, "new subscription" email received |
