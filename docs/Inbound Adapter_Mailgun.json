@@ -1,0 +1,838 @@
+{
+  "name": "Inbound Adapter_Mailgun",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mailgun-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        928,
+        -672
+      ],
+      "id": "aee0c5e7-88b3-40a7-8de1-54c0ef68004f",
+      "name": "Webhook",
+      "webhookId": "c55d094b-24aa-41c0-a2e9-efa4a2385643"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code node (drop-in)\n * Adds dedupe_key generation for inbound_receipts upsert.\n *\n * Dedupe strategy:\n *  - Prefer message-id + pod_id (best for (pod_id, dedupe_key) uniqueness)\n *  - Fallback to message-id + to_localpart\n *  - Last resort: hash-like fallback using subject_hash/payload_hash/timestamp\n *\n * Also preserves existing content_date extraction logic.\n */\n\nfunction normalizeSpaces(s) {\n  return String(s || \"\")\n    .replace(/[\\u00A0\\u202F\\u2007]/g, \" \")\n    .replace(/[\\u200B-\\u200D\\uFEFF]/g, \"\")\n    .replace(/\\r\\n/g, \"\\n\");\n}\n\nfunction extractEmail(s) {\n  if (!s) return null;\n  const str = String(s);\n  const angle = str.match(/<([^>]+)>/);\n  if (angle?.[1]) return angle[1].trim().toLowerCase();\n  const simple = str.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  return simple ? simple[0].trim().toLowerCase() : null;\n}\n\nfunction monthToIndex(mon) {\n  const m = String(mon || \"\").toLowerCase();\n  const map = {\n    jan: 0, january: 0,\n    feb: 1, february: 1,\n    mar: 2, march: 2,\n    apr: 3, april: 3,\n    may: 4,\n    jun: 5, june: 5,\n    jul: 6, july: 6,\n    aug: 7, august: 7,\n    sep: 8, sept: 8, september: 8,\n    oct: 9, october: 9,\n    nov: 10, november: 10,\n    dec: 11, december: 11,\n  };\n  return map[m] ?? null;\n}\n\nfunction pad2(n) {\n  return String(n).padStart(2, \"0\");\n}\n\nfunction parseToYMD(dateStr) {\n  if (!dateStr) return null;\n  const s = normalizeSpaces(dateStr).trim();\n\n  const d1 = new Date(s);\n  if (!Number.isNaN(d1.getTime()) && /[+-]\\d{4}\\b/.test(s)) {\n    return d1.toISOString().slice(0, 10);\n  }\n\n  let m = s.match(/\\b([A-Za-z]{3,9})\\s+(\\d{1,2}),\\s*(\\d{4})\\b/);\n  if (m) {\n    const monIdx = monthToIndex(m[1]);\n    const day = parseInt(m[2], 10);\n    const year = parseInt(m[3], 10);\n    if (monIdx !== null && year >= 1900 && day >= 1 && day <= 31) {\n      return `${year}-${pad2(monIdx + 1)}-${pad2(day)}`;\n    }\n  }\n\n  m = s.match(/\\b(\\d{1,2})\\s+([A-Za-z]{3,9})\\s+(\\d{4})\\b/);\n  if (m) {\n    const day = parseInt(m[1], 10);\n    const monIdx = monthToIndex(m[2]);\n    const year = parseInt(m[3], 10);\n    if (monIdx !== null && year >= 1900 && day >= 1 && day <= 31) {\n      return `${year}-${pad2(monIdx + 1)}-${pad2(day)}`;\n    }\n  }\n\n  const d2 = new Date(s);\n  if (!Number.isNaN(d2.getTime())) {\n    return d2.toISOString().slice(0, 10);\n  }\n\n  return null;\n}\n\nfunction extractForwardedBlocks(text) {\n  const t = normalizeSpaces(text);\n  const lines = t.split(\"\\n\");\n  const blocks = [];\n\n  for (let i = 0; i < lines.length; i++) {\n    const line = (lines[i] || \"\").trim();\n    const isFwd =\n      /forwarded message/i.test(line) ||\n      /begin forwarded message/i.test(line);\n\n    if (!isFwd) continue;\n\n    let from = null;\n    let date = null;\n\n    for (let j = i; j < Math.min(i + 25, lines.length); j++) {\n      const l = (lines[j] || \"\").trim();\n\n      if (!from) {\n        const fm = l.match(/^From:\\s*(.+)\\s*$/i);\n        if (fm?.[1]) from = fm[1].trim();\n      }\n      if (!date) {\n        const dm = l.match(/^Date:\\s*(.+)\\s*$/i);\n        if (dm?.[1]) date = dm[1].trim();\n      }\n\n      if (from && date) {\n        blocks.push({ from, date, index: i });\n        break;\n      }\n    }\n  }\n\n  return blocks;\n}\n\nfunction pickContentDate(body) {\n  const senderEmail =\n    extractEmail(body?.sender) ||\n    extractEmail(body?.[\"X-Envelope-From\"]) ||\n    extractEmail(body?.from);\n\n  const textCandidates = [\n    body?.[\"stripped-text\"],\n    body?.[\"body-plain\"],\n    body?.[\"stripped-html\"],\n    body?.[\"body-html\"],\n  ].filter(Boolean);\n\n  let blocks = [];\n  for (const txt of textCandidates) {\n    const b = extractForwardedBlocks(txt);\n    if (b.length) blocks = blocks.concat(b);\n  }\n\n  if (blocks.length) {\n    const scored = blocks.map((b, idx) => {\n      const fromEmail = extractEmail(b.from);\n      const fromDiffers = senderEmail && fromEmail && fromEmail !== senderEmail;\n      return { ...b, fromEmail, fromDiffers, idx };\n    });\n\n    const vendorBlocks = scored.filter(x => x.fromDiffers);\n    const chosenList = vendorBlocks.length ? vendorBlocks : scored;\n    const chosen = chosenList[chosenList.length - 1];\n\n    const ymd = parseToYMD(chosen.date);\n    if (ymd) return { ymd, source: \"forwarded_header\", raw: chosen.date, from: chosen.fromEmail || chosen.from };\n  }\n\n  const outer = body?.Date || body?.date;\n  const outerYmd = parseToYMD(outer);\n  if (outerYmd) return { ymd: outerYmd, source: \"outer_header\", raw: outer };\n\n  return { ymd: null, source: \"none\", raw: null };\n}\n\n// ------------------- dedupe helpers -------------------\n\nfunction getToLocalpart(itemJson) {\n  const explicit = itemJson?.to_localpart;\n  if (explicit) return String(explicit).trim().toLowerCase();\n\n  const toEmail = itemJson?.to_email || itemJson?.to;\n  const email = extractEmail(toEmail) || (toEmail ? String(toEmail).trim().toLowerCase() : null);\n  if (email && email.includes(\"@\")) return email.split(\"@\")[0];\n\n  return null;\n}\n\nfunction getMessageId(itemJson) {\n  // Prefer normalized field if already present\n  const direct = itemJson?.message_id;\n  if (direct) return String(direct).trim();\n\n  // Try common Mailgun/raw fields\n  const candidates = [\n    itemJson?.body?.[\"Message-Id\"],\n    itemJson?.body?.[\"message-id\"],\n    itemJson?.body?.[\"message_id\"],\n    itemJson?.body?.[\"Message-ID\"],\n    itemJson?.body?.[\"X-Message-Id\"],\n    itemJson?.[\"Message-Id\"],\n    itemJson?.[\"message-id\"],\n  ].filter(Boolean);\n\n  const found = candidates.find(Boolean);\n  return found ? String(found).trim() : null;\n}\n\nfunction buildDedupeKey({ channel, podId, toLocalpart, messageId, subjectHash, payloadHash }) {\n  const ch = channel || \"mailgun\";\n  const scope = podId || toLocalpart || \"unknown\";\n  if (messageId) return `${ch}:${scope}:${messageId}`;\n\n  // last resort: stable-ish fallback\n  const fallback = payloadHash || subjectHash || String(Date.now());\n  return `${ch}:${scope}:fallback:${fallback}`;\n}\n\n// ---- n8n entrypoint ----\nreturn $input.all().map((item) => {\n  const body = item.json?.body ?? {};\n  const { ymd, source, raw, from } = pickContentDate(body);\n\n  const channel = item.json?.channel || \"mailgun\";\n  const podId = item.json?.pod_id ? String(item.json.pod_id) : null;\n\n  const toLocalpart = getToLocalpart(item.json);\n  const messageId = getMessageId(item.json);\n\n  const dedupeKey = buildDedupeKey({\n    channel,\n    podId,\n    toLocalpart,\n    messageId,\n    subjectHash: item.json?.subject_hash,\n    payloadHash: item.json?.payload_hash,\n  });\n\n  return {\n    json: {\n      ...item.json,\n\n      // keep/augment normalized fields\n      channel,\n      to_localpart: toLocalpart ?? item.json?.to_localpart ?? null,\n      message_id: messageId ?? item.json?.message_id ?? null,\n      dedupe_key: dedupeKey,\n\n      // your content_date fields\n      content_date: ymd,\n      content_date_source: source,\n      content_date_raw: raw,\n      content_date_from: from ?? null,\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -576
+      ],
+      "id": "0dc3fc0b-38d4-43de-b781-c68d962b24ea",
+      "name": "Normalize Payload"
+    },
+    {
+      "parameters": {
+        "tableId": "inbound_receipts",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "channel",
+              "fieldValue": "={{ $json.channel }}"
+            },
+            {
+              "fieldId": "received_at",
+              "fieldValue": "={{ $json.received_at }}"
+            },
+            {
+              "fieldId": "to_email",
+              "fieldValue": "={{ $json.to_email }}"
+            },
+            {
+              "fieldId": "from_email",
+              "fieldValue": "={{ $json.from_email }}"
+            },
+            {
+              "fieldId": "subject",
+              "fieldValue": "={{ $json.subject }}"
+            },
+            {
+              "fieldId": "dedupe_key",
+              "fieldValue": "={{ $json.dedupe_key }}"
+            },
+            {
+              "fieldId": "body_text",
+              "fieldValue": "={{ $json.body_plain }}"
+            },
+            {
+              "fieldId": "body_html",
+              "fieldValue": "={{ $json.body_html }}"
+            },
+            {
+              "fieldId": "raw_payload",
+              "fieldValue": "={{ {\n  headers_raw: $json.headers_raw ?? null,\n  attachments: $json.attachments ?? null,\n  raw_payload_ref: $json.raw_payload_ref ?? null\n} }}"
+            },
+            {
+              "fieldId": "from_domain",
+              "fieldValue": "={{ ($json.from_email || '').split('@')[1]?.toLowerCase() || null }}"
+            },
+            {
+              "fieldId": "to_localpart",
+              "fieldValue": "={{ ($json.to_email || '').split('@')[0]?.toLowerCase() || null }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $json.message_id }}"
+            },
+            {
+              "fieldId": "content_date",
+              "fieldValue": "={{ $json.content_date }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        -192
+      ],
+      "id": "9a98d79b-63ba-44bb-afb1-eb3a38c7812a",
+      "name": "Upsert Receipt",
+      "alwaysOutputData": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code node: Verify Mailgun Signature (outputs isValid)\n *\n * - Does NOT throw on invalid signature (so IF node can route)\n * - DOES throw if MAILGUN_SIGNING_KEY is missing (config error)\n */\n\nconst crypto = require('crypto');\n\nconst MAILGUN_SIGNING_KEY = $vars.MAILGUN_SIGNING_KEY;\n\nif (!MAILGUN_SIGNING_KEY) {\n  throw new Error('MAILGUN_SIGNING_KEY is not set');\n}\n\nfunction getBody(json) {\n  if (json.body && typeof json.body === 'object') return json.body;\n  return json;\n}\n\nconst original = $json;\nconst body = getBody(original);\n\nconst timestamp = body.timestamp;\nconst token = body.token;\nconst signature = body.signature;\n\nlet isValid = false;\nlet error = null;\n\nif (!timestamp || !token || !signature) {\n  error = 'missing_signature_fields';\n} else {\n  const data = `${timestamp}${token}`;\n  const expectedSignature = crypto\n    .createHmac('sha256', MAILGUN_SIGNING_KEY)\n    .update(data)\n    .digest('hex');\n\n  isValid =\n    signature.length === expectedSignature.length &&\n    crypto.timingSafeEqual(\n      Buffer.from(signature, 'utf8'),\n      Buffer.from(expectedSignature, 'utf8')\n    );\n\n  if (!isValid) error = 'invalid_signature';\n}\n\n// Attach verification result, pass everything through\nreturn [{\n  json: {\n    ...original,\n    signature_check: {\n      isValid,\n      error,\n      // optional debug fields if you want:\n      // hasTimestamp: !!timestamp,\n      // hasToken: !!token,\n      // hasSignature: !!signature,\n    },\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        -672
+      ],
+      "id": "519c97ca-166a-4b03-9610-e6e7752c9d0a",
+      "name": "Verify Signature"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"accepted\",\n  \"receipt_id\": $json.id,\n  \"dedupe\": false\n} }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1376,
+        -384
+      ],
+      "id": "8ef9208b-c564-4062-98f0-9dfa32db5edc",
+      "name": "Acknowledge Receipt"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f2ba9187-801d-4593-946e-d8d7abbb8102",
+              "leftValue": "={{$json.errorMessage || $json.error?.message || ''}}",
+              "rightValue": "inbound_receipts_dedupe_key_uq",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1376,
+        -96
+      ],
+      "id": "774bb71b-ee10-4a36-8063-f9f554a9d099",
+      "name": "Is Dupe"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"duplicate\",\n  \"dedupe_key\": $json.dedupe_key,\n  \"dedupe\": true\n} }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1600,
+        -192
+      ],
+      "id": "c6b2f630-2248-4c78-99ec-83a80271a0ab",
+      "name": "Acknowledge Receipt of Dupe"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"failed\",\n  \"message\": $json.error\n} }}",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1600,
+        0
+      ],
+      "id": "16fc0115-9eac-445f-a9d5-044d77b4a216",
+      "name": "Respond to Webhook re Failure"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "c6RH29SybeKJC7cT",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/c6RH29SybeKJC7cT",
+          "cachedResultName": "SubSounder — Mail Parser"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2256,
+        -512
+      ],
+      "id": "230c4eb8-5521-418e-9bf2-345434fdec5b",
+      "name": "Call 'General Parser'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f199fb71-96c5-4ffb-8c83-5d0b25965648",
+              "leftValue": "={{ $json.signature_check.isValid }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1376,
+        -672
+      ],
+      "id": "d14af33e-2650-4839-81f6-2a332e8c0f24",
+      "name": "Signature OK"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"status\": \"failed\",\n  \"message\": \"invalid_signature\"\n} }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1600,
+        -784
+      ],
+      "id": "796bf69d-6a9c-43c7-b406-462868040b48",
+      "name": "Respond to Webhook with 401"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "pods",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "alias_email",
+              "keyValue": "={{ $json.to_email }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        -384
+      ],
+      "id": "b05cde83-3a35-404f-8d51-ff6b26fd8e64",
+      "name": "Fetch Pod",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a41f8dd3-636b-439e-9c03-21a3290c50e9",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "b8937cee-4e18-430c-b8b9-446ee587ddf8",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1808,
+        -384
+      ],
+      "id": "59dbbc15-777c-4dc6-aefa-f69b208cd073",
+      "name": "Sender Has Pod"
+    },
+    {
+      "parameters": {
+        "jsCode": "// receipt_id from the inbound_receipts upsert result\nconst receipt_id = $('Acknowledge Receipt').first().json?.id ?? null;\n\n// This Code node runs after FetchPod (serial wiring), so current $json is the pod row (or empty)\nconst pod_id = $json?.id ?? null;\n\nreturn [\n  {\n    json: {\n      receipt_id,\n      pod_id,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        -512
+      ],
+      "id": "4f9e7597-21aa-47dd-ae5a-8536975aabbe",
+      "name": "Compile Data for Parser"
+    },
+    {
+      "parameters": {
+        "tableId": "pods",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "alias_email",
+              "fieldValue": "={{ $('Acknowledge Receipt').item.json.to_email }}"
+            },
+            {
+              "fieldId": "created_via",
+              "fieldValue": "mailgun_tirekicker"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        -272
+      ],
+      "id": "215e8526-c918-4f41-83d5-5c50e2025312",
+      "name": "Create Tirekicker Pod",
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "tableId": "profiles",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "pod_id",
+              "fieldValue": "={{ $json.id }}"
+            },
+            {
+              "fieldId": "email",
+              "fieldValue": "={{ $('Acknowledge Receipt').item.json.from_email }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2256,
+        -272
+      ],
+      "id": "c8f94031-c8bd-4fe4-a07e-f46329d6b3bf",
+      "name": "Create Tirekicker Profile",
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "pods",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.pod_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "owner_profile_id",
+              "fieldValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        -272
+      ],
+      "id": "f96df416-2ad8-4dfa-a753-6f66862c1147",
+      "name": "Update Pod with Tirekicker ID",
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        -512
+      ],
+      "id": "de1f1908-ee9f-4078-a3d0-275c2c3f62ea",
+      "name": "Prep Receipt Patch"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://vjhlzownjvkasbtwrqvz.supabase.co/rest/v1/parser_runs?id=eq.\" + $('Log Run').item.json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.parser_run_patch ?? {} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2704,
+        -512
+      ],
+      "id": "5b92c3be-27ab-4100-9fe3-110484172cbc",
+      "name": "Patch Parser Run Log",
+      "credentials": {
+        "supabaseApi": {
+          "id": "JJwxg7Xid1eWbZvA",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "flyingdog.app.n8n.cloud",
+            "user-agent": "Go-http-client/2.0",
+            "content-length": "84206",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "35.212.1.240",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "US",
+            "cf-ray": "9d462b593966d63c-IAD",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-worker": "n8n.cloud",
+            "content-type": "application/x-www-form-urlencoded",
+            "x-forwarded-for": "35.212.1.240, 172.70.35.195",
+            "x-forwarded-host": "flyingdog.app.n8n.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "traefik-prod-users-gwc-48-77b57c955f-nkvdb",
+            "x-is-trusted": "yes",
+            "x-real-ip": "35.212.1.240"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "Arc-Authentication-Results": "i=1; mx.google.com; arc=none",
+            "Arc-Message-Signature": "i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :dkim-signature; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; fh=KyNeJ5Bwr9FKwztJ+KP1mJHK1NPCzev6saa5+AYl2dc=; b=Pq1fXJ55nNyzHEXyvsSAzyFT6DZHimqKp5ht6bZMNZZVQnDw3dSw2XyovQD2ATbM1O p3uw8vdoJ4HeVnzpil6O1O3ye7MUA/SxNp33wbCFMb6ErT19uIS9RfLh5xljGyEOXzcU D88vG0ZRwT8f/y9IGai9IE1m7Bw1P6zCpl0FpCJQKVdztmfn6fFgajeXEqL+GathajuW E/V5Ro0seGxfYGTl0BcsrsV8G8V6GJTPqk2U/nmVitZnr6Jvxc7egXWgTDeeqkPXiQOa G0J+5qmRjGzTYmkW0u1PIGYxuCalgJ9nFadjOVjOXz2CBquJDzpAGz3adO2947IwgHfu +NYQ==; darn=inbound.subsounder.com",
+            "Arc-Seal": "i=1; a=rsa-sha256; t=1772179440; cv=none; d=google.com; s=arc-20240605; b=KQLruW0PEplvFlQxhcaAaRf7wBzXgWZZn/a8YuoVA1qIgHiQd8VjJZ4fHsMDl/yPsn 0hjjUgeFBmtgrXGA73zUi/MIpxBlKOPlOv1Kx+WFYJ3oCWov+6Ot2x9DnlBF57hoNHrU CIG515KPEmbxx+MjCONzem5Yx2HsRNaPa86aemCMcpXp2Kh1Ae6X9uAj9uVXjZRkV/3Z kvYcaJ8V1td6bQUjhczpxVSjoPJ2ZnpXXP3i9YeAtliNxthhjY5od0RXmHITf9+F92i6 UsZt3e+WhKpNJerhu2REGNL1B4K2ZJ2BzBeNd39Uqy8AKAp9ayJ+oBD9y8zP5956SRKB XPzQ==",
+            "Content-Type": "multipart/alternative; boundary=\"000000000000f74e76064bc9adb4\"",
+            "Date": "Fri, 27 Feb 2026 16:03:48 +0800",
+            "Dkim-Signature": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=20230601; t=1772179440; x=1772784240; darn=inbound.subsounder.com; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :from:to:cc:subject:date:message-id:reply-to; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; b=dSjUSJom2k8UKQM89162PptEcEOxYgZOnzw7vsSLJ2wvcVHoz8UT2tNYWhrsWJ29z3 8alfjnJmqbpRaS2PV5DXazSZ4BXAdqb4+RBmUKQbDLws1vtu1Pv4V7gCHuOqfgzJfgvR Ipv8ZhZ7f3gALw9e4nZ89S0Q111JblN4rwB+i5bNnBJZ2Ww4BKu1eCt/kgIKYW8ASy1i MPF7nkeltGcD+rSdGSTbjX7Ewbo00L20KbmzutBwdXE+Okjf4ugglyRSgH1cJSdzEz67 wFaI882NfWiY8TzqhVpDp5M9o2D+jtA4JV5XpJ0OLajtlvjnx8PzICmg4SeUFFbH1aSe vQCg==",
+            "From": "Lek Dimarucot <lek101@gmail.com>",
+            "In-Reply-To": "<6d4c5c12-4bc5-4401-af30-9ecf97ee1766@mtasv.net>",
+            "Message-Id": "<CACZRj_gWGSO940LNwdijVJbeiBaMbyjWomRSJMxbuvuj_iaMJw@mail.gmail.com>",
+            "Mime-Version": "1.0",
+            "Received": "by mail-qt1-f181.google.com with SMTP id d75a77b69052e-506a67282a0so19101591cf.0 for <lekd2026@inbound.subsounder.com>; Fri, 27 Feb 2026 00:04:00 -0800 (PST)",
+            "References": "<6d4c5c12-4bc5-4401-af30-9ecf97ee1766@mtasv.net>",
+            "Subject": "Fwd: Your n8n receipt",
+            "To": "lekd2026@inbound.subsounder.com",
+            "X-Envelope-From": "lek101@gmail.com",
+            "X-Gm-Features": "AaiRm53t18XfMrYv2OUVF20lBlHQJ77dHVEqBFBnoTNXrBWxLAkiEJiI-2qrLek",
+            "X-Gm-Gg": "ATEYQzyB1KqrNk9ieQuXgb4Ik4WPXW2HmOTDj9274S4jFNR7rlaXmGFvQUYOHHqfJLz k2epnxECcKX424tXyd1d1j6Gmb+ROL8ZAQtMyIKpJd0TlPjH9IJlIvu+16PP/fdbcP+GLOyppCS gxHrzrOhyx9hWE/R+Ldw7/pOBfe01KGpBJc+E3Ahvpk/uv2IY4vnt7HzjEtC6R3JDVzXVO240GO KnPDSJp+j9+80Onj6Bv8l5UebScLyPb2FSLFYQyA2CRVVNXgTqiFKr1jzhN8DPFvzsr/u5bW03H xJfIvBw=",
+            "X-Gm-Message-State": "AOJu0YyYpbh/eX3LW00VXZy4kXLs747Kp9utZ9mn90Lzw/JagHktYWWi jaicPtK3qjduKsJn0HoZ0Lp5fciJgwF+ZBKIQb2IY1xrMLWfnfHTonXAIPc46tUh2MB9BRkQ2Xb Nltz9kJfXsX9/NUc5uONYnirAQT89jIrTrQ==",
+            "X-Google-Dkim-Signature": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=1e100.net; s=20230601; t=1772179440; x=1772784240; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :x-gm-gg:x-gm-message-state:from:to:cc:subject:date:message-id :reply-to; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; b=H/hBSIlgrhnggW2nhUlnIEOL3c3tRt6Uy3ogHSzd+j5PKtVj1gcilx5/YtWNSMnSWo ai/hk8Jnhn/wuOxADYZn6Toa1ra5RlgY7V/qo9i/F9uF6ksHF1NnpBHpOfbkr831xLAn OCJFpdqowpPO/UvHgyl/1rRBRgWa30WOEg/mN5BKaJE98zHnPqTzVV5HfwO+SKWOMcuZ 4vUBy63B/sC5Mi8eVETw5m4PLR6cxtaP6KH54XZlfO2pWHlWP7RKsQr1eUbjVMDgpf2Y guN/7ddB4aSxf8RWImejD3L0OHeTZf9L/OPAfdWQne4G+LgWShtfeIMn+gUlZKvzqoeT O+tA==",
+            "X-Mailgun-Incoming": "Yes",
+            "X-Received": "by 2002:ac8:5f8f:0:b0:506:a1a8:c6fb with SMTP id d75a77b69052e-507528765a2mr24028951cf.2.1772179439437; Fri, 27 Feb 2026 00:03:59 -0800 (PST)",
+            "body-html": "<div dir=\"ltr\"><br><br><div class=\"gmail_quote gmail_quote_container\"><div dir=\"ltr\" class=\"gmail_attr\">---------- Forwarded message ---------<br>From: <strong class=\"gmail_sendername\" dir=\"auto\">n8n (via Paddle.com)</strong> <span dir=\"auto\">&lt;<a href=\"mailto:help@paddle.com\">help@paddle.com</a>&gt;</span><br>Date: Tue, Feb 3, 2026 at 9:48 AM<br>Subject: Your n8n receipt<br>To:  &lt;<a href=\"mailto:lek101@gmail.com\">lek101@gmail.com</a>&gt;<br></div><br><br><div class=\"msg4360089434846143751\">\r\n        \r\n        \r\n  \r\n        \r\n        \r\n        \r\n        \r\n      \r\n      \r\n      \r\n      <div style=\"letter-spacing:0;background-color:#f5f5f8;margin:0;padding:0;font-family:Lato,Helvetica,Roboto,sans-serif\"><center style=\"margin:0\">\r\n    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"max-width:600px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n        <tbody><tr>\r\n            <td height=\"100%\" width=\"100%\" style=\"padding:0\">\r\n                <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\r\n                    <tbody><tr>\r\n                        <td class=\"m_4360089434846143751fnUKoX\" style=\"height:30px\" height=\"30\"></td>\r\n                    </tr>\r\n                </tbody></table>\r\n                <center style=\"margin:0\">\r\n                    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"max-width:600px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                        <tbody><tr>\r\n                            <td height=\"100%\" width=\"100%\" style=\"padding:0\">\r\n                                <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin:0;border-top:0;border-radius:0;background-color:#ffffff\" bgcolor=\"#FFFFFF\">\r\n                                    <tbody><tr>\r\n                                        <td align=\"center\" valign=\"top\">\r\n                                            <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                <tbody><tr>\r\n                                                    <td style=\"padding:50px\" class=\"m_4360089434846143751eCjnOB\">\r\n                                                        <table style=\"max-width:none;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\r\n                                                            <tbody><tr>\r\n                                                                <td align=\"center\" style=\"text-align:left\"><img height=\"70\" src=\"https://paddle.s3.amazonaws.com/user/121380/subs_845268_icon.png\" style=\"display:block;margin:auto;margin-bottom:28px\">\r\n                                                                    <div></div>\r\n                                                                    <h3 style=\"line-height:32px;font-weight:900;font-size:24px;margin-bottom:12px;text-align:center;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Your n8n subscription receipt</h3>\r\n                                                                    <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:24px;margin-left:0;text-align:center;color:#73809c;font-family:Lato,Helvetica,Roboto,sans-serif\">Receipt # 72652049-155848060</p>\r\n                                                                    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                        <tbody><tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                            <td class=\"m_4360089434846143751enEALA\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\r\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Amount Paid</p>\r\n                                                                                <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$66.33</p>\r\n                                                                            </td>\r\n                                                                            <td class=\"m_4360089434846143751dvZQTF\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\r\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Receipt Date</p>\r\n                                                                                <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">3rd February 2026</p>\r\n                                                                            </td>\r\n                                                                            <td class=\"m_4360089434846143751dvZQTF\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\r\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Payment Method</p>\r\n                                                                                <table role=\"presentation\" style=\"min-width:150px\">\r\n                                                                                    <tbody>\r\n                                                                                        <tr>\r\n                                                                                            <td style=\"vertical-align:middle;margin-right:4px\">\r\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard.png\" alt=\"mastercard\" style=\"display:block;height:28px\">\r\n                                                                                                                                                                                            </td>\r\n                                                                                            <td style=\"vertical-align:middle\">\r\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard.png\" alt=\"mastercard\" style=\"display:none;height:28px;margin-right:4px\">\r\n                                                                                                                                                                                            </td>\r\n                                                                                            <td style=\"vertical-align:middle\">\r\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard-dark-mode.png\" alt=\"mastercard\" style=\"display:none;height:28px\">\r\n                                                                                                                                                                                            </td>\r\n                                                                                                <td style=\"vertical-align:middle\">\r\n                                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">ending in 6847</p>\r\n                                                                                                </td>\r\n                                                                                        </tr>\r\n                                                                                    </tbody>\r\n                                                                                </table>\r\n                                                                            </td>\r\n                                                                        </tr>\r\n                                                                    </tbody></table>\r\n                                                                    <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\r\n                                                                        <tbody><tr>\r\n                                                                            <td class=\"m_4360089434846143751ccYULw\" style=\"height:26px\" height=\"26\"></td>\r\n                                                                        </tr>\r\n                                                                    </tbody></table>                                                                    <table class=\"m_4360089434846143751bxYnMH\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"border:1px solid #d2d4de;border-top-right-radius:4px;border-top-left-radius:4px;border-bottom-right-radius:0;border-bottom-left-radius:0;border-collapse:separate;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                        <tbody style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                    <td class=\"m_4360089434846143751dDIQXL\" style=\"color:#45567c;line-height:20px;padding:20px 28px 16px 28px;text-align:left;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\r\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Cloud Pro-1 </p>\r\n                                                                                    </td>\r\n                                                                                    <td class=\"m_4360089434846143751bNxgJg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 16px 28px;text-align:right;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\r\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$60.00</p>\r\n                                                                                    </td>\r\n                                                                                </tr>                                                                                \r\n                                                                                                                                                            \r\n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                <td class=\"m_4360089434846143751kfRMRg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 0 28px;text-align:left;font-weight:200;font-size:11px;border-top:1px solid #d2d4de;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\r\n                                                                                <td class=\"m_4360089434846143751kfRMRg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 0 28px;text-align:left;font-weight:200;font-size:11px;border-top:1px solid #d2d4de;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\r\n                                                                            </tr>\r\n                                                                                <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                    <td class=\"m_4360089434846143751eILCZX\" style=\"color:#45567c;line-height:20px;padding:0 28px 12px 28px;text-align:left;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\r\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Sales Tax (10.55%)</p>\r\n                                                                                    </td>\r\n                                                                                    <td class=\"m_4360089434846143751cKAmbI\" style=\"color:#45567c;line-height:20px;padding:0 28px 12px 28px;text-align:right;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\r\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$6.33</p>\r\n                                                                                    </td>\r\n                                                                                </tr>\r\n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                <td class=\"m_4360089434846143751kWKGch\" style=\"color:#45567c;line-height:20px;padding:0 28px 20px 28px;text-align:left;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\r\n                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Amount Paid</p>\r\n                                                                                </td>\r\n                                                                                <td class=\"m_4360089434846143751a-dmYW\" style=\"color:#45567c;line-height:20px;padding:0 28px 20px 28px;text-align:right;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\r\n                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$66.33</p>\r\n                                                                                </td>\r\n                                                                            </tr>\r\n                                                                        </tbody>\r\n                                                                    </table>\r\n                                                                    <table style=\"border:1px solid #d2d4de;border-top-right-radius:0;border-top-left-radius:0;border-bottom-right-radius:4px;border-bottom-left-radius:4px;border-collapse:separate;margin-bottom:40px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" class=\"m_4360089434846143751jEGcwr\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\r\n                                                                        <tbody style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                <td class=\"m_4360089434846143751hLpooZ\" style=\"color:#45567c;line-height:20px;padding:15px;text-align:center;font-weight:200;font-size:11px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"center\">\r\n                                                                                    <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"text-align:center;width:100%\" width=\"100%\" align=\"center\">\r\n                                                                                        <tbody><tr>\r\n                                                                                            <td style=\"border-radius:&#39;50px&#39;;text-align:&#39;center&#39;\" align=\"&#39;center&#39;\">\r\n                                                                                                <div>\r\n                                                                                                    <div></div><a href=\"https://my.paddle.com/receipt/72652049-155848060/311541123-chre7ec4db6fc7f-c3c9dc5956\" class=\"m_4360089434846143751gQYZ\" style=\"background-color:#0074c7;border:2px solid none;border-radius:4px;color:#ffffff;display:inline-block;font-size:16px;font-weight:900;line-height:44px;padding-top:0;padding-right:0;padding-left:0;padding-bottom:0;margin-bottom:0;text-align:center;text-decoration:none;width:216px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" target=\"_blank\"><span style=\"color:#ffffff\">View Receipt</span></a>\r\n                                                                                                </div>\r\n                                                                                            </td>\r\n                                                                                        </tr>\r\n                                                                                    </tbody></table>\r\n                                                                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:10px;margin-left:0;color:#73809c;font-family:Lato,Helvetica,Roboto,sans-serif;margin:12px 13px 5px 13px\">The $66.33 payment will appear on your bank/card statement as: <br><b style=\"font-weight:700\"><a href=\"http://PADDLE.NET\" target=\"_blank\">PADDLE.NET</a>* N8N CLOUD1</b></p>\r\n                                                                                </td>\r\n                                                                            </tr><tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                                                                                <td class=\"m_4360089434846143751bbjcZN\" style=\"color:#45567c;line-height:20px;padding:0px;text-align:left;font-weight:200;font-size:11px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\r\n                                                                            </tr>\r\n                                                            </tbody></table></td></tr>\r\n                                                            \r\n                                                        </tbody></table>                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:20px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Your subscription will renew at $66.33 unless you cancel, by <b style=\"font-weight:700\">2nd March 2026</b>. To learn more or cancel, <a href=\"https://subscription-management.paddle.com/subscription/33150578/hash/c1355230e2767a056b955ccf2cdd893703c632e64fc26b85d869115a5f889899/manage-subscription\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">review your subscription</a>.</p>\r\n                                                        <hr style=\"margin:40px 0;border:none;border-bottom:1px solid #a2abbd;margin-top:0;margin-bottom:10px;border-bottom-color:#d2d4de\">\r\n                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:10px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">If you need help with your n8n subscription, please contact us on <a href=\"https://paddle.net?h=73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">paddle.net</a> or reply to this <a href=\"mailto:help@paddle.com?subject=Re:+Your+n8n+receipt\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">email</a>.</p>\r\n                                                        <hr style=\"margin:40px 0;border:none;border-bottom:1px solid #a2abbd;margin-top:2px;margin-bottom:28px;border-bottom-color:#d2d4de\">                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Thanks,</p>\r\n                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">n8n</p>\r\n                                                    </td>\r\n                                                </tr>\r\n                                            </tbody></table>\r\n                                        </td>\r\n                                    </tr>\r\n                                </tbody></table>\r\n                            </td>\r\n                        </tr>\r\n                    </tbody></table>\r\n            </center></td>\r\n        </tr>\r\n    </tbody></table>\r\n</center>\r\n<table class=\"m_4360089434846143751footerContainer\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin:0;border-top:0;border-radius:0;background-color:#f5f5f8\" bgcolor=\"#F5F5F8\">\r\n    <tbody><tr>\r\n        <td align=\"center\" valign=\"top\">\r\n            <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\r\n                <tbody><tr>\r\n                    <td style=\"padding:35px\" class=\"m_4360089434846143751eCjnOB\">\r\n                        <table style=\"max-width:none;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\r\n                            <tbody><tr>\r\n                                <td align=\"center\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-light.png\" alt=\"logo\" style=\"margin-bottom:10px\">\r\n                                    <div style=\"display:none\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-light.png\" alt=\"logo\" style=\"display:none;margin-bottom:10px\"></div>\r\n                                    <div style=\"display:none\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-dark.png\" alt=\"logo\" style=\"display:none;margin-bottom:10px\"></div>\r\n                                    <div class=\"m_4360089434846143751bwfxVg\" style=\"display:none\">\r\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">Paddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT. © 2026 Paddle. All rights reserved.</p>\r\n                                    </div>\r\n                                    <div class=\"m_4360089434846143751dTVHoQ\" style=\"display:block\">\r\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">Paddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT </p>\r\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">© 2026 Paddle. All rights reserved.</p>\r\n                                    </div>\r\n                                        <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\r\n                                            <tbody><tr>\r\n                                                <td class=\"m_4360089434846143751ejpTNE\" style=\"height:10px\" height=\"10\"></td>\r\n                                            </tr>\r\n                                        </tbody></table>\r\n                                        <p id=\"m_4360089434846143751order-id\" style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">72652049-155848060</p>\r\n                                    <div style=\"display:none\"><u></u>Your n8n receipt<u></u>\r\n                                        <div id=\"m_4360089434846143751paddle-lang\">en</div>\r\n                                        <div id=\"m_4360089434846143751paddle-type\">subscription-receipt</div>\r\n                                        <div id=\"m_4360089434846143751paddle-sub-type\">recurring</div>\r\n                                        <div id=\"m_4360089434846143751paddle-hash\">73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d</div>\r\n                                    </div>\r\n                                </td>\r\n                            </tr>\r\n                        </tbody></table>\r\n                    </td>\r\n                </tr>\r\n            </tbody></table>\r\n        </td>\r\n    </tr>\r\n</tbody></table>\r\n\r\n\r\n\r\n<img src=\"https://ea.pstmrk.it/open?m=v3_1.Os3cMZnuwnjkOn_296vODw.qDQCIKTsLPT1wQ9UV2Kpz93i2NkKCSxdlLD2EHgQqi9G47m9vXZUnrs-cs4v9BuwrrlMLBelqg74nMaFBC2hlftRDNy9ca0W2o2YIBMhAk0JrPSc9Mb5etIoZz7LY7n5yFRnGQIXXpMpnXrZKzunhT5QZjnX9J1-QW8TeOjOiasyL-XIA6jxPY6E3fWo82KoXeNeWSyPoORJLxvrfRsU6lwRjH8amTYL2iIvPbnmqN8YxfSi8RPhNF-Th7C4kSl0Dyjlp8pe1qGyAQWbPDcyolgYuUCo7vIfGMQA-ByJSZqj6aVBZ1tFtCJogkHjE6g934wFcCWYTO5AC7ADgLADfzk16BoTs50fTa5ehrNtWWWllhEbSQsXAoRgx_bsnXKz74jia0eL84JZjI-lphNwjEwYdq6_aOsPneQIuYokWnXCjPCik0ycafaeUa7dvOlpEQCGkn-zAtEaRTe-6u9VQcRG-_YqaUsXIaxn7DtLn_lLX1HTfjRZjQTTRNrucIAZ\" width=\"1\" height=\"1\" border=\"0\" alt=\"\"></div>\r\n</div></div></div>\r\n",
+            "body-plain": "---------- Forwarded message ---------\r\nFrom: n8n (via Paddle.com) <help@paddle.com>\r\nDate: Tue, Feb 3, 2026 at 9:48 AM\r\nSubject: Your n8n receipt\r\nTo: <lek101@gmail.com>\r\n\r\n\r\nYour n8n subscription receipt\r\n\r\nReceipt # 72652049-155848060\r\n\r\nAmount Paid\r\n\r\n$66.33\r\n\r\nReceipt Date\r\n\r\n3rd February 2026\r\n\r\nPayment Method\r\n[image: mastercard] [image: mastercard] [image: mastercard]\r\n\r\nending in 6847\r\n\r\nCloud Pro-1\r\n\r\n$60.00\r\n\r\nSales Tax (10.55%)\r\n\r\n$6.33\r\n\r\nAmount Paid\r\n\r\n$66.33\r\nView Receipt\r\n<https://my.paddle.com/receipt/72652049-155848060/311541123-chre7ec4db6fc7f-c3c9dc5956>\r\n\r\nThe $66.33 payment will appear on your bank/card statement as:\r\n*PADDLE.NET <http://PADDLE.NET>* N8N CLOUD1*\r\n\r\nYour subscription will renew at $66.33 unless you cancel, by *2nd March\r\n2026*. To learn more or cancel, review your subscription\r\n<https://subscription-management.paddle.com/subscription/33150578/hash/c1355230e2767a056b955ccf2cdd893703c632e64fc26b85d869115a5f889899/manage-subscription>\r\n.\r\n------------------------------\r\n\r\nIf you need help with your n8n subscription, please contact us on paddle.net\r\n<https://paddle.net?h=73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d>\r\nor reply to this email <help@paddle.com?subject=Re:+Your+n8n+receipt>.\r\n------------------------------\r\n\r\nThanks,\r\n\r\nn8n\r\n[image: logo]\r\n[image: logo]\r\n[image: logo]\r\n\r\nPaddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT. ©\r\n2026 Paddle. All rights reserved.\r\n\r\nPaddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT\r\n\r\n© 2026 Paddle. All rights reserved.\r\n\r\n72652049-155848060\r\nYour n8n receipt\r\nen\r\nsubscription-receipt\r\nrecurring\r\n73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d\r\n",
+            "from": "Lek Dimarucot <lek101@gmail.com>",
+            "message-headers": "[[\"X-Mailgun-Incoming\",\"Yes\"],[\"X-Envelope-From\",\"lek101@gmail.com\"],[\"Received\",\"from mail-qt1-f181.google.com (mail-qt1-f181.google.com [209.85.160.181]) by 15037d419a13e67de1445de8da98a2ebaa450b90354830e4e066b9a7d3fe7d2e with SMTP id <undefined> (version=TLS1.3, cipher=TLS_AES_128_GCM_SHA256); Fri, 27 Feb 2026 08:04:00 GMT\"],[\"Received\",\"by mail-qt1-f181.google.com with SMTP id d75a77b69052e-506a67282a0so19101591cf.0 for <lekd2026@inbound.subsounder.com>; Fri, 27 Feb 2026 00:04:00 -0800 (PST)\"],[\"Arc-Seal\",\"i=1; a=rsa-sha256; t=1772179440; cv=none; d=google.com; s=arc-20240605; b=KQLruW0PEplvFlQxhcaAaRf7wBzXgWZZn/a8YuoVA1qIgHiQd8VjJZ4fHsMDl/yPsn 0hjjUgeFBmtgrXGA73zUi/MIpxBlKOPlOv1Kx+WFYJ3oCWov+6Ot2x9DnlBF57hoNHrU CIG515KPEmbxx+MjCONzem5Yx2HsRNaPa86aemCMcpXp2Kh1Ae6X9uAj9uVXjZRkV/3Z kvYcaJ8V1td6bQUjhczpxVSjoPJ2ZnpXXP3i9YeAtliNxthhjY5od0RXmHITf9+F92i6 UsZt3e+WhKpNJerhu2REGNL1B4K2ZJ2BzBeNd39Uqy8AKAp9ayJ+oBD9y8zP5956SRKB XPzQ==\"],[\"Arc-Message-Signature\",\"i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :dkim-signature; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; fh=KyNeJ5Bwr9FKwztJ+KP1mJHK1NPCzev6saa5+AYl2dc=; b=Pq1fXJ55nNyzHEXyvsSAzyFT6DZHimqKp5ht6bZMNZZVQnDw3dSw2XyovQD2ATbM1O p3uw8vdoJ4HeVnzpil6O1O3ye7MUA/SxNp33wbCFMb6ErT19uIS9RfLh5xljGyEOXzcU D88vG0ZRwT8f/y9IGai9IE1m7Bw1P6zCpl0FpCJQKVdztmfn6fFgajeXEqL+GathajuW E/V5Ro0seGxfYGTl0BcsrsV8G8V6GJTPqk2U/nmVitZnr6Jvxc7egXWgTDeeqkPXiQOa G0J+5qmRjGzTYmkW0u1PIGYxuCalgJ9nFadjOVjOXz2CBquJDzpAGz3adO2947IwgHfu +NYQ==; darn=inbound.subsounder.com\"],[\"Arc-Authentication-Results\",\"i=1; mx.google.com; arc=none\"],[\"Dkim-Signature\",\"v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=20230601; t=1772179440; x=1772784240; darn=inbound.subsounder.com; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :from:to:cc:subject:date:message-id:reply-to; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; b=dSjUSJom2k8UKQM89162PptEcEOxYgZOnzw7vsSLJ2wvcVHoz8UT2tNYWhrsWJ29z3 8alfjnJmqbpRaS2PV5DXazSZ4BXAdqb4+RBmUKQbDLws1vtu1Pv4V7gCHuOqfgzJfgvR Ipv8ZhZ7f3gALw9e4nZ89S0Q111JblN4rwB+i5bNnBJZ2Ww4BKu1eCt/kgIKYW8ASy1i MPF7nkeltGcD+rSdGSTbjX7Ewbo00L20KbmzutBwdXE+Okjf4ugglyRSgH1cJSdzEz67 wFaI882NfWiY8TzqhVpDp5M9o2D+jtA4JV5XpJ0OLajtlvjnx8PzICmg4SeUFFbH1aSe vQCg==\"],[\"X-Google-Dkim-Signature\",\"v=1; a=rsa-sha256; c=relaxed/relaxed; d=1e100.net; s=20230601; t=1772179440; x=1772784240; h=to:subject:message-id:date:from:in-reply-to:references:mime-version :x-gm-gg:x-gm-message-state:from:to:cc:subject:date:message-id :reply-to; bh=7UeKQbkAIufyh4WD+TISHzv8oIw2OjSbFEi3fWSCgvc=; b=H/hBSIlgrhnggW2nhUlnIEOL3c3tRt6Uy3ogHSzd+j5PKtVj1gcilx5/YtWNSMnSWo ai/hk8Jnhn/wuOxADYZn6Toa1ra5RlgY7V/qo9i/F9uF6ksHF1NnpBHpOfbkr831xLAn OCJFpdqowpPO/UvHgyl/1rRBRgWa30WOEg/mN5BKaJE98zHnPqTzVV5HfwO+SKWOMcuZ 4vUBy63B/sC5Mi8eVETw5m4PLR6cxtaP6KH54XZlfO2pWHlWP7RKsQr1eUbjVMDgpf2Y guN/7ddB4aSxf8RWImejD3L0OHeTZf9L/OPAfdWQne4G+LgWShtfeIMn+gUlZKvzqoeT O+tA==\"],[\"X-Gm-Message-State\",\"AOJu0YyYpbh/eX3LW00VXZy4kXLs747Kp9utZ9mn90Lzw/JagHktYWWi jaicPtK3qjduKsJn0HoZ0Lp5fciJgwF+ZBKIQb2IY1xrMLWfnfHTonXAIPc46tUh2MB9BRkQ2Xb Nltz9kJfXsX9/NUc5uONYnirAQT89jIrTrQ==\"],[\"X-Gm-Gg\",\"ATEYQzyB1KqrNk9ieQuXgb4Ik4WPXW2HmOTDj9274S4jFNR7rlaXmGFvQUYOHHqfJLz k2epnxECcKX424tXyd1d1j6Gmb+ROL8ZAQtMyIKpJd0TlPjH9IJlIvu+16PP/fdbcP+GLOyppCS gxHrzrOhyx9hWE/R+Ldw7/pOBfe01KGpBJc+E3Ahvpk/uv2IY4vnt7HzjEtC6R3JDVzXVO240GO KnPDSJp+j9+80Onj6Bv8l5UebScLyPb2FSLFYQyA2CRVVNXgTqiFKr1jzhN8DPFvzsr/u5bW03H xJfIvBw=\"],[\"X-Received\",\"by 2002:ac8:5f8f:0:b0:506:a1a8:c6fb with SMTP id d75a77b69052e-507528765a2mr24028951cf.2.1772179439437; Fri, 27 Feb 2026 00:03:59 -0800 (PST)\"],[\"Mime-Version\",\"1.0\"],[\"References\",\"<6d4c5c12-4bc5-4401-af30-9ecf97ee1766@mtasv.net>\"],[\"In-Reply-To\",\"<6d4c5c12-4bc5-4401-af30-9ecf97ee1766@mtasv.net>\"],[\"From\",\"Lek Dimarucot <lek101@gmail.com>\"],[\"Date\",\"Fri, 27 Feb 2026 16:03:48 +0800\"],[\"X-Gm-Features\",\"AaiRm53t18XfMrYv2OUVF20lBlHQJ77dHVEqBFBnoTNXrBWxLAkiEJiI-2qrLek\"],[\"Message-Id\",\"<CACZRj_gWGSO940LNwdijVJbeiBaMbyjWomRSJMxbuvuj_iaMJw@mail.gmail.com>\"],[\"Subject\",\"Fwd: Your n8n receipt\"],[\"To\",\"lekd2026@inbound.subsounder.com\"],[\"Content-Type\",\"multipart/alternative; boundary=\\\"000000000000f74e76064bc9adb4\\\"\"]]",
+            "recipient": "lekd2026@inbound.subsounder.com",
+            "sender": "lek101@gmail.com",
+            "signature": "30959fdc9319a1e66a71527e18301ed6c7fd4e856906f511ea4235db8603b7da",
+            "stripped-html": "<div dir=\"ltr\"><br><br><div class=\"gmail_quote gmail_quote_container\"><div dir=\"ltr\" class=\"gmail_attr\">---------- Forwarded message ---------<br>From: <strong class=\"gmail_sendername\" dir=\"auto\">n8n (via Paddle.com)</strong> <span dir=\"auto\">&lt;<a href=\"mailto:help@paddle.com\">help@paddle.com</a>&gt;</span><br>Date: Tue, Feb 3, 2026 at 9:48 AM<br>Subject: Your n8n receipt<br>To:  &lt;<a href=\"mailto:lek101@gmail.com\">lek101@gmail.com</a>&gt;<br></div><br><br><div class=\"msg4360089434846143751\">\n        \n        \n  \n        \n        \n        \n        \n      \n      \n      \n      <div style=\"letter-spacing:0;background-color:#f5f5f8;margin:0;padding:0;font-family:Lato,Helvetica,Roboto,sans-serif\"><center style=\"margin:0\">\n    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"max-width:600px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n        <tbody><tr>\n            <td height=\"100%\" width=\"100%\" style=\"padding:0\">\n                <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\n                    <tbody><tr>\n                        <td class=\"m_4360089434846143751fnUKoX\" style=\"height:30px\" height=\"30\"></td>\n                    </tr>\n                </tbody></table>\n                <center style=\"margin:0\">\n                    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"max-width:600px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                        <tbody><tr>\n                            <td height=\"100%\" width=\"100%\" style=\"padding:0\">\n                                <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin:0;border-top:0;border-radius:0;background-color:#ffffff\" bgcolor=\"#FFFFFF\">\n                                    <tbody><tr>\n                                        <td align=\"center\" valign=\"top\">\n                                            <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                <tbody><tr>\n                                                    <td style=\"padding:50px\" class=\"m_4360089434846143751eCjnOB\">\n                                                        <table style=\"max-width:none;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\n                                                            <tbody><tr>\n                                                                <td align=\"center\" style=\"text-align:left\"><img height=\"70\" src=\"https://paddle.s3.amazonaws.com/user/121380/subs_845268_icon.png\" style=\"display:block;margin:auto;margin-bottom:28px\">\n                                                                    <div></div>\n                                                                    <h3 style=\"line-height:32px;font-weight:900;font-size:24px;margin-bottom:12px;text-align:center;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Your n8n subscription receipt</h3>\n                                                                    <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:24px;margin-left:0;text-align:center;color:#73809c;font-family:Lato,Helvetica,Roboto,sans-serif\">Receipt # 72652049-155848060</p>\n                                                                    <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                        <tbody><tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                            <td class=\"m_4360089434846143751enEALA\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Amount Paid</p>\n                                                                                <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$66.33</p>\n                                                                            </td>\n                                                                            <td class=\"m_4360089434846143751dvZQTF\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Receipt Date</p>\n                                                                                <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">3rd February 2026</p>\n                                                                            </td>\n                                                                            <td class=\"m_4360089434846143751dvZQTF\" style=\"vertical-align:top;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" valign=\"top\">\n                                                                                <p style=\"font-size:12px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Payment Method</p>\n                                                                                <table role=\"presentation\" style=\"min-width:150px\">\n                                                                                    <tbody>\n                                                                                        <tr>\n                                                                                            <td style=\"vertical-align:middle;margin-right:4px\">\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard.png\" alt=\"mastercard\" style=\"display:block;height:28px\">\n                                                                                                                                                                                            </td>\n                                                                                            <td style=\"vertical-align:middle\">\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard.png\" alt=\"mastercard\" style=\"display:none;height:28px;margin-right:4px\">\n                                                                                                                                                                                            </td>\n                                                                                            <td style=\"vertical-align:middle\">\n                                                                                                    <img src=\"https://cdn.paddle.com/email-templates/images/icon-mastercard-dark-mode.png\" alt=\"mastercard\" style=\"display:none;height:28px\">\n                                                                                                                                                                                            </td>\n                                                                                                <td style=\"vertical-align:middle\">\n                                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:24px;margin-top:0;margin-right:0;margin-bottom:4px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">ending in 6847</p>\n                                                                                                </td>\n                                                                                        </tr>\n                                                                                    </tbody>\n                                                                                </table>\n                                                                            </td>\n                                                                        </tr>\n                                                                    </tbody></table>\n                                                                    <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\n                                                                        <tbody><tr>\n                                                                            <td class=\"m_4360089434846143751ccYULw\" style=\"height:26px\" height=\"26\"></td>\n                                                                        </tr>\n                                                                    </tbody></table>                                                                    <table class=\"m_4360089434846143751bxYnMH\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"border:1px solid #d2d4de;border-top-right-radius:4px;border-top-left-radius:4px;border-bottom-right-radius:0;border-bottom-left-radius:0;border-collapse:separate;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                        <tbody style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                    <td class=\"m_4360089434846143751dDIQXL\" style=\"color:#45567c;line-height:20px;padding:20px 28px 16px 28px;text-align:left;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Cloud Pro-1 </p>\n                                                                                    </td>\n                                                                                    <td class=\"m_4360089434846143751bNxgJg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 16px 28px;text-align:right;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$60.00</p>\n                                                                                    </td>\n                                                                                </tr>                                                                                \n                                                                                                                                                            \n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                <td class=\"m_4360089434846143751kfRMRg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 0 28px;text-align:left;font-weight:200;font-size:11px;border-top:1px solid #d2d4de;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\n                                                                                <td class=\"m_4360089434846143751kfRMRg\" style=\"color:#45567c;line-height:20px;padding:20px 28px 0 28px;text-align:left;font-weight:200;font-size:11px;border-top:1px solid #d2d4de;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\n                                                                            </tr>\n                                                                                <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                    <td class=\"m_4360089434846143751eILCZX\" style=\"color:#45567c;line-height:20px;padding:0 28px 12px 28px;text-align:left;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Sales Tax (10.55%)</p>\n                                                                                    </td>\n                                                                                    <td class=\"m_4360089434846143751cKAmbI\" style=\"color:#45567c;line-height:20px;padding:0 28px 12px 28px;text-align:right;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\n                                                                                        <p style=\"font-size:14px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$6.33</p>\n                                                                                    </td>\n                                                                                </tr>\n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                <td class=\"m_4360089434846143751kWKGch\" style=\"color:#45567c;line-height:20px;padding:0 28px 20px 28px;text-align:left;font-weight:500;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\">\n                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Amount Paid</p>\n                                                                                </td>\n                                                                                <td class=\"m_4360089434846143751a-dmYW\" style=\"color:#45567c;line-height:20px;padding:0 28px 20px 28px;text-align:right;font-weight:900;font-size:14px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"right\">\n                                                                                    <p style=\"font-size:14px;font-weight:900;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">$66.33</p>\n                                                                                </td>\n                                                                            </tr>\n                                                                        </tbody>\n                                                                    </table>\n                                                                    <table style=\"border:1px solid #d2d4de;border-top-right-radius:0;border-top-left-radius:0;border-bottom-right-radius:4px;border-bottom-left-radius:4px;border-collapse:separate;margin-bottom:40px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" class=\"m_4360089434846143751jEGcwr\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\n                                                                        <tbody style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                            <tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                <td class=\"m_4360089434846143751hLpooZ\" style=\"color:#45567c;line-height:20px;padding:15px;text-align:center;font-weight:200;font-size:11px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"center\">\n                                                                                    <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"text-align:center;width:100%\" width=\"100%\" align=\"center\">\n                                                                                        <tbody><tr>\n                                                                                            <td style=\"border-radius:&#39;50px&#39;;text-align:&#39;center&#39;\" align=\"&#39;center&#39;\">\n                                                                                                <div>\n                                                                                                    <div></div><a href=\"https://my.paddle.com/receipt/72652049-155848060/311541123-chre7ec4db6fc7f-c3c9dc5956\" class=\"m_4360089434846143751gQYZ\" style=\"background-color:#0074c7;border:2px solid none;border-radius:4px;color:#ffffff;display:inline-block;font-size:16px;font-weight:900;line-height:44px;padding-top:0;padding-right:0;padding-left:0;padding-bottom:0;margin-bottom:0;text-align:center;text-decoration:none;width:216px;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" target=\"_blank\"><span style=\"color:#ffffff\">View Receipt</span></a>\n                                                                                                </div>\n                                                                                            </td>\n                                                                                        </tr>\n                                                                                    </tbody></table>\n                                                                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:10px;margin-left:0;color:#73809c;font-family:Lato,Helvetica,Roboto,sans-serif;margin:12px 13px 5px 13px\">The $66.33 payment will appear on your bank/card statement as: <br><b style=\"font-weight:700\"><a href=\"http://PADDLE.NET\" target=\"_blank\">PADDLE.NET</a>* N8N CLOUD1</b></p>\n                                                                                </td>\n                                                                            </tr><tr style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                                                                                <td class=\"m_4360089434846143751bbjcZN\" style=\"color:#45567c;line-height:20px;padding:0px;text-align:left;font-weight:200;font-size:11px;border-top:0;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" align=\"left\"></td>\n                                                                            </tr>\n                                                            </tbody></table></td></tr>\n                                                            \n                                                        </tbody></table>                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:20px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Your subscription will renew at $66.33 unless you cancel, by <b style=\"font-weight:700\">2nd March 2026</b>. To learn more or cancel, <a href=\"https://subscription-management.paddle.com/subscription/33150578/hash/c1355230e2767a056b955ccf2cdd893703c632e64fc26b85d869115a5f889899/manage-subscription\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">review your subscription</a>.</p>\n                                                        <hr style=\"margin:40px 0;border:none;border-bottom:1px solid #a2abbd;margin-top:0;margin-bottom:10px;border-bottom-color:#d2d4de\">\n                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:10px;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">If you need help with your n8n subscription, please contact us on <a href=\"https://paddle.net?h=73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">paddle.net</a> or reply to this <a href=\"mailto:help@paddle.com?subject=Re:+Your+n8n+receipt\" style=\"text-decoration:none;color:#0074c7\" target=\"_blank\">email</a>.</p>\n                                                        <hr style=\"margin:40px 0;border:none;border-bottom:1px solid #a2abbd;margin-top:2px;margin-bottom:28px;border-bottom-color:#d2d4de\">                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">Thanks,</p>\n                                                        <p style=\"font-size:14px;font-weight:500;line-height:24px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#45567c;font-family:Lato,Helvetica,Roboto,sans-serif\">n8n</p>\n                                                    </td>\n                                                </tr>\n                                            </tbody></table>\n                                        </td>\n                                    </tr>\n                                </tbody></table>\n                            </td>\n                        </tr>\n                    </tbody></table>\n            </center></td>\n        </tr>\n    </tbody></table>\n</center>\n<table class=\"m_4360089434846143751footerContainer\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin:0;border-top:0;border-radius:0;background-color:#f5f5f8\" bgcolor=\"#F5F5F8\">\n    <tbody><tr>\n        <td align=\"center\" valign=\"top\">\n            <table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\">\n                <tbody><tr>\n                    <td style=\"padding:35px\" class=\"m_4360089434846143751eCjnOB\">\n                        <table style=\"max-width:none;font-family:&#39;Lato&#39;,&#39;Helvetica&#39;,&#39;Roboto&#39;,sans-serif\" cellspacing=\"0\" cellpadding=\"0\" width=\"100%\">\n                            <tbody><tr>\n                                <td align=\"center\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-light.png\" alt=\"logo\" style=\"margin-bottom:10px\">\n                                    <div style=\"display:none\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-light.png\" alt=\"logo\" style=\"display:none;margin-bottom:10px\"></div>\n                                    <div style=\"display:none\"><img width=\"95\" height=\"30\" src=\"https://cdn.paddle.com/email-templates/images/paddle-logo-dark.png\" alt=\"logo\" style=\"display:none;margin-bottom:10px\"></div>\n                                    <div class=\"m_4360089434846143751bwfxVg\" style=\"display:none\">\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">Paddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT. © 2026 Paddle. All rights reserved.</p>\n                                    </div>\n                                    <div class=\"m_4360089434846143751dTVHoQ\" style=\"display:block\">\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">Paddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT </p>\n                                        <p style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">© 2026 Paddle. All rights reserved.</p>\n                                    </div>\n                                        <table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"margin-top:0\">\n                                            <tbody><tr>\n                                                <td class=\"m_4360089434846143751ejpTNE\" style=\"height:10px\" height=\"10\"></td>\n                                            </tr>\n                                        </tbody></table>\n                                        <p id=\"m_4360089434846143751order-id\" style=\"font-size:12px;font-weight:500;line-height:20px;margin-top:0;margin-right:0;margin-bottom:0;margin-left:0;color:#a2abbd;font-family:Lato,Helvetica,Roboto,sans-serif\">72652049-155848060</p>\n                                    <div style=\"display:none\"><u></u>Your n8n receipt<u></u>\n                                        <div id=\"m_4360089434846143751paddle-lang\">en</div>\n                                        <div id=\"m_4360089434846143751paddle-type\">subscription-receipt</div>\n                                        <div id=\"m_4360089434846143751paddle-sub-type\">recurring</div>\n                                        <div id=\"m_4360089434846143751paddle-hash\">73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d</div>\n                                    </div>\n                                </td>\n                            </tr>\n                        </tbody></table>\n                    </td>\n                </tr>\n            </tbody></table>\n        </td>\n    </tr>\n</tbody></table>\n\n\n\n<img src=\"https://ea.pstmrk.it/open?m=v3_1.Os3cMZnuwnjkOn_296vODw.qDQCIKTsLPT1wQ9UV2Kpz93i2NkKCSxdlLD2EHgQqi9G47m9vXZUnrs-cs4v9BuwrrlMLBelqg74nMaFBC2hlftRDNy9ca0W2o2YIBMhAk0JrPSc9Mb5etIoZz7LY7n5yFRnGQIXXpMpnXrZKzunhT5QZjnX9J1-QW8TeOjOiasyL-XIA6jxPY6E3fWo82KoXeNeWSyPoORJLxvrfRsU6lwRjH8amTYL2iIvPbnmqN8YxfSi8RPhNF-Th7C4kSl0Dyjlp8pe1qGyAQWbPDcyolgYuUCo7vIfGMQA-ByJSZqj6aVBZ1tFtCJogkHjE6g934wFcCWYTO5AC7ADgLADfzk16BoTs50fTa5ehrNtWWWllhEbSQsXAoRgx_bsnXKz74jia0eL84JZjI-lphNwjEwYdq6_aOsPneQIuYokWnXCjPCik0ycafaeUa7dvOlpEQCGkn-zAtEaRTe-6u9VQcRG-_YqaUsXIaxn7DtLn_lLX1HTfjRZjQTTRNrucIAZ\" width=\"1\" height=\"1\" border=\"0\" alt=\"\"></div>\n</div></div></div>\n",
+            "stripped-text": "---------- Forwarded message ---------\r\nFrom: n8n (via Paddle.com) <help@paddle.com>\r\nDate: Tue, Feb 3, 2026 at 9:48 AM\r\nSubject: Your n8n receipt\r\nTo: <lek101@gmail.com>\r\n\r\n\r\nYour n8n subscription receipt\r\n\r\nReceipt # 72652049-155848060\r\n\r\nAmount Paid\r\n\r\n$66.33\r\n\r\nReceipt Date\r\n\r\n3rd February 2026\r\n\r\nPayment Method\r\n[image: mastercard] [image: mastercard] [image: mastercard]\r\n\r\nending in 6847\r\n\r\nCloud Pro-1\r\n\r\n$60.00\r\n\r\nSales Tax (10.55%)\r\n\r\n$6.33\r\n\r\nAmount Paid\r\n\r\n$66.33\r\nView Receipt\r\n<https://my.paddle.com/receipt/72652049-155848060/311541123-chre7ec4db6fc7f-c3c9dc5956>\r\n\r\nThe $66.33 payment will appear on your bank/card statement as:\r\n*PADDLE.NET <http://PADDLE.NET>* N8N CLOUD1*\r\n\r\nYour subscription will renew at $66.33 unless you cancel, by *2nd March\r\n2026*. To learn more or cancel, review your subscription\r\n<https://subscription-management.paddle.com/subscription/33150578/hash/c1355230e2767a056b955ccf2cdd893703c632e64fc26b85d869115a5f889899/manage-subscription>\r\n.\r\n------------------------------\r\n\r\nIf you need help with your n8n subscription, please contact us on paddle.net\r\n<https://paddle.net?h=73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d>\r\nor reply to this email <help@paddle.com?subject=Re:+Your+n8n+receipt>.\r\n------------------------------\r\n\r\nThanks,\r\n\r\nn8n\r\n[image: logo]\r\n[image: logo]\r\n[image: logo]\r\n\r\nPaddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT. ©\r\n2026 Paddle. All rights reserved.\r\n\r\nPaddle.com Market Ltd, Judd House, 18-29 Mora Street, London EC1V 8BT\r\n\r\n© 2026 Paddle. All rights reserved.\r\n\r\n72652049-155848060\r\nYour n8n receipt\r\nen\r\nsubscription-receipt\r\nrecurring\r\n73b075f12251313a4ea81957ca4a4efb7b0c0b87202e3060025c7f41ec227c825ab2d33006540b2d6be6102a969d",
+            "subject": "Fwd: Your n8n receipt",
+            "timestamp": "1772179444",
+            "token": "f94ace433f558988eb1dda04ea462cd53ce02c6fef8288789d"
+          },
+          "webhookUrl": "https://flyingdog.app.n8n.cloud/webhook/mailgun-inbound",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "Upsert Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature": {
+      "main": [
+        [
+          {
+            "node": "Signature OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Receipt": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Dupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Dupe": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Receipt of Dupe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook re Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Receipt": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'General Parser'": {
+      "main": [
+        [
+          {
+            "node": "Prep Receipt Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature OK": {
+      "main": [
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook with 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pod": {
+      "main": [
+        [
+          {
+            "node": "Sender Has Pod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sender Has Pod": {
+      "main": [
+        [
+          {
+            "node": "Compile Data for Parser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Tirekicker Pod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Data for Parser": {
+      "main": [
+        [
+          {
+            "node": "Call 'General Parser'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Tirekicker Pod": {
+      "main": [
+        [
+          {
+            "node": "Create Tirekicker Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Tirekicker Profile": {
+      "main": [
+        [
+          {
+            "node": "Update Pod with Tirekicker ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Pod with Tirekicker ID": {
+      "main": [
+        [
+          {
+            "node": "Compile Data for Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Receipt Patch": {
+      "main": [
+        [
+          {
+            "node": "Patch Parser Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "9e5aee12-9339-46df-87c4-02f66e5c5e06",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bf1f6e4a65dec1a0b105465f8afbfaff4bdfdf77ab7e8d6d274fc28a6c186a1a"
+  },
+  "id": "TcCma28MS9N6YREx",
+  "tags": []
+}
