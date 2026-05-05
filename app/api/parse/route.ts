@@ -4,6 +4,7 @@ import { normalize } from '@/lib/parser/normalize'
 import { extract } from '@/lib/parser/extract'
 import { validate } from '@/lib/parser/validate'
 import { match, type ExistingSubscription } from '@/lib/parser/match'
+import { sendNewSubscriptionEmail } from '@/lib/email'
 
 const PARSER_NAME = 'gpt4o-mini-v1'
 const PARSER_VERSION = '1.0.0'
@@ -142,6 +143,13 @@ export async function POST(req: NextRequest) {
 
     const subs: ExistingSubscription[] = existingSubscriptions ?? []
 
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('pod_id', pod_id)
+      .maybeSingle()
+    const profileEmail = profile?.email ?? null
+
     let soundingsWritten = 0
     let subscriptionsInserted = 0
     let subscriptionsUpdated = 0
@@ -244,7 +252,17 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', sounding.id)
 
-      // e. Phase 5 placeholder: send "new subscription" notification email
+      // e. Send "new subscription" notification email
+      if (matchResult.action === 'insert' && profileEmail) {
+        sendNewSubscriptionEmail(profileEmail, {
+          display_name: matchResult.payload.display_name,
+          amount: matchResult.payload.amount,
+          currency: matchResult.payload.currency,
+          billing_cadence: matchResult.payload.billing_cadence,
+          next_renewal_at: matchResult.payload.next_renewal_at,
+          cancellation_url: null,
+        }).catch((err) => console.error('[parse] new subscription email failed:', err))
+      }
     }
 
     // 10. Update parser_runs.actions
