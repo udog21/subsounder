@@ -3,7 +3,7 @@ import Mailgun from 'mailgun.js'
 const mg = new Mailgun(FormData)
 const client = mg.client({ username: 'api', key: process.env.MAILGUN_API_KEY! })
 
-const FROM = 'SubSounder <hello@subsounder.com>'
+const FROM = 'SubSounder <sys-bot@subsounder.com>'
 const SENDING_DOMAIN = 'subsounder.com'
 
 function formatAmount(amount: number | null, currency: string | null): string {
@@ -107,4 +107,39 @@ export async function sendRenewalReminderEmail(
   ]
 
   await send(to, subject, lines.join('\n'))
+}
+
+export async function sendAdminReviewDigest(
+  to: string,
+  runs: Array<{
+    id: string
+    created_at: string
+    classification: string | null
+    confidence: number | null
+    status: string
+    from_domain: string | null
+    subject: string | null
+  }>,
+): Promise<void> {
+  if (runs.length === 0) return
+
+  const count = runs.length
+  const lines: string[] = [
+    `${count} parser run${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} your review:`,
+    '',
+    ...runs.map(
+      (r) =>
+        `• ${r.subject ?? '(no subject)'} — ${r.from_domain ?? 'unknown sender'}\n` +
+        `  classification: ${r.classification ?? 'n/a'}, confidence: ${r.confidence ?? 'n/a'}, status: ${r.status}\n` +
+        `  id: ${r.id}`,
+    ),
+    '',
+    'Set reviewed_at in the parser_runs table to clear these.',
+  ]
+
+  await send(
+    to,
+    `SubSounder: ${count} parse run${count === 1 ? '' : 's'} need review`,
+    lines.join('\n'),
+  )
 }

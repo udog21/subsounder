@@ -8,8 +8,7 @@ import { sendNewSubscriptionEmail } from '@/lib/email'
 
 const PARSER_NAME = 'gpt4o-mini-v1'
 const PARSER_VERSION = '1.0.0'
-const MODEL_NAME = 'gpt-4o-mini'
-const PROMPT_VERSION = '1.0.0'
+const PROMPT_VERSION_FALLBACK = '1'
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,6 +25,20 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServiceClient()
+
+    // Fetch active prompt template + thresholds
+    const { data: promptRow } = await supabase
+      .from('prompt_templates')
+      .select('version, system_prompt, model_hint, variables_schema')
+      .eq('agent_name', 'email_extractor')
+      .eq('is_active', true)
+      .maybeSingle()
+
+    const thresholds = (promptRow?.variables_schema as Record<string, Record<string, number>> | null)
+      ?.thresholds ?? {}
+    const needsReviewBelow: number = thresholds.needs_review_below ?? 0.65
+    const promptVersion = promptRow?.version?.toString() ?? PROMPT_VERSION_FALLBACK
+    const modelName = promptRow?.model_hint ?? 'gpt-4o-mini'
 
     // 2. Fetch receipt
     const { data: receipt, error: receiptError } = await supabase
@@ -70,10 +83,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'skipped', reason: 'duplicate_run' })
     }
 
-    // 6. Call GPT-4 mini
+    // 6. Call LLM
     let extraction
     try {
-      extraction = await extract(normalized_text)
+      extraction = await extract(normalized_text, promptRow?.system_prompt, promptRow?.model_hint ?? undefined)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'extraction_failed'
       await supabase.from('parser_runs').insert({
@@ -82,9 +95,10 @@ export async function POST(req: NextRequest) {
         inbound_receipt_id: receipt_id,
         parser_name: PARSER_NAME,
         parser_version: PARSER_VERSION,
-        model_name: MODEL_NAME,
-        prompt_version: PROMPT_VERSION,
+        model_name: modelName,
+        prompt_version: promptVersion,
         status: 'error',
+        needs_review: true,
         input_hash,
         input_excerpt,
         error_code: 'extraction_failed',
@@ -100,6 +114,11 @@ export async function POST(req: NextRequest) {
     // 7. Validate extract → suggest parser_run_status
     const { valid, errors: validationErrors, parser_run_status } = validate(extraction)
 
+    const needsReview =
+      parser_run_status === 'error' ||
+      valid.classification === 'maybe_subscription' ||
+      (parser_run_status !== 'no_signal' && valid.confidence < needsReviewBelow)
+
     // 8. Insert parser_runs row
     const { data: parserRun, error: runInsertError } = await supabase
       .from('parser_runs')
@@ -109,11 +128,12 @@ export async function POST(req: NextRequest) {
         inbound_receipt_id: receipt_id,
         parser_name: PARSER_NAME,
         parser_version: PARSER_VERSION,
-        model_name: MODEL_NAME,
-        prompt_version: PROMPT_VERSION,
+        model_name: modelName,
+        prompt_version: promptVersion,
         status: parser_run_status,
         classification: valid.classification,
         confidence: valid.confidence,
+        needs_review: needsReview,
         input_hash,
         input_excerpt,
         output_json: valid,
@@ -133,21 +153,18 @@ export async function POST(req: NextRequest) {
 
     const parserRunId = parserRun.id
 
-    // Fetch existing subscriptions for matching
-    const { data: existingSubscriptions } = await supabase
-      .from('subscriptions')
-      .select(
-        'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, plan_name, amount, currency, last_observed_content_date, billing_cadence, next_renewal_at, cancel_by_at, status',
-      )
-      .eq('pod_id', pod_id)
+    // Fetch existing subscriptions for matching + profile email for notifications
+    const [{ data: existingSubscriptions }, { data: profile }] = await Promise.all([
+      supabase
+        .from('subscriptions')
+        .select(
+          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, plan_name, amount, currency, last_observed_content_date, billing_cadence, next_renewal_at, cancel_by_at, status',
+        )
+        .eq('pod_id', pod_id),
+      supabase.from('profiles').select('email').eq('pod_id', pod_id).maybeSingle(),
+    ])
 
     const subs: ExistingSubscription[] = existingSubscriptions ?? []
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('pod_id', pod_id)
-      .maybeSingle()
     const profileEmail = profile?.email ?? null
 
     let soundingsWritten = 0
@@ -202,7 +219,6 @@ export async function POST(req: NextRequest) {
         if (!subInsertError && newSub) {
           resolvedSubscriptionId = newSub.id
           subscriptionsInserted++
-          // Add to local subs cache so subsequent signals in this run can match against it
           subs.push({
             id: newSub.id,
             provider_name: matchResult.payload.provider_name,
@@ -252,7 +268,7 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', sounding.id)
 
-      // e. Send "new subscription" notification email
+      // e. Send "new subscription" notification email (fire-and-forget)
       if (matchResult.action === 'insert' && profileEmail) {
         sendNewSubscriptionEmail(profileEmail, {
           display_name: matchResult.payload.display_name,
@@ -304,6 +320,7 @@ export async function POST(req: NextRequest) {
       status: 'ok',
       parser_run_id: parserRunId,
       classification: valid.classification,
+      needs_review: needsReview,
       soundings_written: soundingsWritten,
       subscriptions_inserted: subscriptionsInserted,
       subscriptions_updated: subscriptionsUpdated,

@@ -104,7 +104,8 @@ const EXTRACTION_SCHEMA = {
   additionalProperties: false,
 }
 
-const SYSTEM_PROMPT = `You are a subscription email parser. Extract billing and subscription signals from forwarded emails.
+// Fallback used when no active prompt is found in prompt_templates
+const FALLBACK_SYSTEM_PROMPT = `You are a subscription email parser. Extract billing and subscription signals from forwarded emails.
 
 Classify the email and extract any subscription signals:
 - "subscription" = clear subscription service email (renewal, receipt, charge, trial notice)
@@ -122,13 +123,17 @@ Field rules:
 - currency = ISO 4217 three-letter code (USD, EUR, GBP, etc.)
 - All dates must be ISO 8601 (YYYY-MM-DD or full datetime with timezone)`
 
-export async function extract(normalizedText: string): Promise<ExtractionResult> {
+export async function extract(
+  normalizedText: string,
+  systemPrompt?: string,
+  modelHint?: string,
+): Promise<ExtractionResult> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: modelHint ?? 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt ?? FALLBACK_SYSTEM_PROMPT },
       { role: 'user', content: normalizedText },
     ],
     response_format: {
