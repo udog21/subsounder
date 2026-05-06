@@ -8,4 +8,4 @@ directory = ".open-next/assets"
 binding = "ASSETS"
 
 [triggers]
-crons = ["*/5 * * * *", "0 9 * * *"]
+crons = ["*/5 * * * *", "0 8 * * *", "0 9 * * *"]
