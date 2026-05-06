@@ -1,0 +1,285 @@
+/* ─── Layout ─── */
+.page {
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+.inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* ─── Page header ─── */
+.header {
+  margin-bottom: 32px;
+}
+
+.headerTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.burns {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.burnMonthly {
+  font-size: 16px;
+  font-weight: 500;
+  color: #cccccc;
+}
+
+.burnAnnual {
+  font-size: 13px;
+  color: #666666;
+}
+
+.burnSavings {
+  font-size: 11px;
+  color: #4a7c5a;
+  margin-top: 2px;
+}
+
+/* ─── Alias row ─── */
+.aliasRow {
+  background: #111111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.aliasLabel {
+  font-size: 11px;
+  color: #555555;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.aliasText {
+  font-size: 14px;
+  font-family: monospace;
+  color: #cccccc;
+}
+
+/* ─── Empty state ─── */
+.empty {
+  text-align: center;
+  padding: 64px 20px;
+}
+
+.emptyTitle {
+  font-size: 16px;
+  margin-bottom: 10px;
+  color: #666666;
+}
+
+.emptyBody {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #444444;
+}
+
+.emptyAlias {
+  font-family: monospace;
+  color: #888888;
+}
+
+/* ─── Subscription list sections ─── */
+.activeSection {
+  margin-bottom: 40px;
+}
+
+.cancelledLabel {
+  font-size: 11px;
+  color: #444444;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ─── Subscription card ─── */
+.card {
+  background: #111111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.cardDimmed {
+  opacity: 0.45;
+}
+
+.cardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cardLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.favicon {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.faviconFallback {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #888888;
+  flex-shrink: 0;
+}
+
+.nameBlock {
+  min-width: 0;
+}
+
+.displayName {
+  font-weight: 500;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain {
+  font-size: 12px;
+  color: #555555;
+  margin-top: 1px;
+}
+
+.cardRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.amount {
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.annualHint {
+  font-size: 11px;
+  color: #555555;
+}
+
+/* ─── Card bottom row ─── */
+.cardBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1e1e1e;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cardBottomLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.renewal {
+  font-size: 13px;
+  color: #888888;
+}
+
+.renewalOverdue {
+  color: #f87171;
+}
+
+.noRenewal {
+  font-size: 13px;
+  color: #444444;
+}
+
+.cancelLink {
+  font-size: 13px;
+  color: #cccccc;
+  padding: 4px 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.howToCancelLink {
+  font-size: 13px;
+  color: #555555;
+  padding: 4px 10px;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* ─── Status badge ─── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badgeActive    { background: #0f2a1a; color: #4ade80; }
+.badgeCancelled { background: #1f1f1f; color: #777777; }
+.badgeTrial     { background: #2a1f08; color: #fbbf24; }
+
+/* ─── Difficulty dots ─── */
+.difficultyDots {
+  font-size: 12px;
+  color: #666666;
+}
+
+.difficultyMarks {
+  letter-spacing: -1px;
+  /* color set inline — computed from difficulty value */
+}
+
+/* ─── Trial countdown ─── */
+.trialCountdown {
+  font-size: 12px;
+  /* color set inline — computed from days remaining */
+}

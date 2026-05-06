@@ -89,6 +89,7 @@ WORKERS_URL
 - TypeScript throughout; `strict: true`
 - No `export const runtime = 'edge'` — must use Node.js runtime for CF Workers compat
 - Server components fetch data directly via Supabase server client; no useEffect data fetching
+- Catalog UI (`app/page.tsx`) uses a CSS Module (`app/page.module.css`) — Figma CSS exports can be pasted directly into the module; computed colors (difficulty dots, trial countdown urgency) stay inline since they're runtime values
 - Errors surface as typed responses, not thrown exceptions in API routes
 
 ## IDE

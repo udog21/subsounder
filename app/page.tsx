@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import CopyButton from './components/CopyButton'
+import styles from './page.module.css'
 
 type Subscription = {
   id: string
@@ -94,8 +95,8 @@ function DifficultyDots({ difficulty }: { difficulty: number | null }) {
   const color = difficulty <= 2 ? '#4ade80' : difficulty === 3 ? '#fbbf24' : '#f87171'
   const label = difficulty <= 2 ? 'Easy to cancel' : difficulty === 3 ? 'Moderate' : 'Difficult to cancel'
   return (
-    <span style={{ fontSize: '12px', color: '#666666' }}>
-      <span style={{ color, letterSpacing: '-1px' }}>
+    <span className={styles.difficultyDots}>
+      <span className={styles.difficultyMarks} style={{ color }}>
         {'●'.repeat(difficulty)}{'○'.repeat(5 - difficulty)}
       </span>
       {' '}{label}
@@ -104,25 +105,17 @@ function DifficultyDots({ difficulty }: { difficulty: number | null }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    active:    { bg: '#0f2a1a', text: '#4ade80', label: 'Active' },
-    cancelled: { bg: '#1f1f1f', text: '#777777', label: 'Cancelled' },
-    trial:     { bg: '#2a1f08', text: '#fbbf24', label: 'Trial' },
+  const labelMap: Record<string, string> = {
+    active: 'Active', cancelled: 'Cancelled', trial: 'Trial',
   }
-  const s = map[status] ?? map.active
+  const classMap: Record<string, string> = {
+    active: styles.badgeActive,
+    cancelled: styles.badgeCancelled,
+    trial: styles.badgeTrial,
+  }
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 8px',
-      borderRadius: '4px',
-      background: s.bg,
-      color: s.text,
-      fontSize: '11px',
-      fontWeight: '600',
-      letterSpacing: '0.06em',
-      textTransform: 'uppercase',
-    }}>
-      {s.label}
+    <span className={`${styles.badge} ${classMap[status] ?? styles.badgeActive}`}>
+      {labelMap[status] ?? 'Active'}
     </span>
   )
 }
@@ -136,7 +129,7 @@ function TrialCountdown({ cancel_by_at, trial_ends_at }: { cancel_by_at: string 
   const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(deadline))
   const daysText = days <= 0 ? 'today' : days === 1 ? '1 day left' : `${days} days left`
   return (
-    <span style={{ fontSize: '12px', color }}>
+    <span className={styles.trialCountdown} style={{ color }}>
       {label} {date} · {daysText}
     </span>
   )
@@ -150,16 +143,9 @@ function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean
     : null
 
   return (
-    <div style={{
-      background: '#111111',
-      border: '1px solid #2a2a2a',
-      borderRadius: '8px',
-      padding: '16px 20px',
-      opacity: dimmed ? 0.45 : 1,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
-        {/* Left: favicon + name + domain */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+    <div className={`${styles.card} ${dimmed ? styles.cardDimmed : ''}`}>
+      <div className={styles.cardTop}>
+        <div className={styles.cardLeft}>
           {sub.provider_domain ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -167,61 +153,38 @@ function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean
               alt=""
               width={20}
               height={20}
-              style={{ borderRadius: '3px', flexShrink: 0 }}
+              className={styles.favicon}
             />
           ) : (
-            <div style={{
-              width: 20, height: 20, borderRadius: '3px', background: '#2a2a2a',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '10px', color: '#888888', flexShrink: 0,
-            }}>
+            <div className={styles.faviconFallback}>
               {sub.display_name.charAt(0).toUpperCase()}
             </div>
           )}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: '500', fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {sub.display_name}
-            </div>
+          <div className={styles.nameBlock}>
+            <div className={styles.displayName}>{sub.display_name}</div>
             {sub.provider_domain && (
-              <div style={{ fontSize: '12px', color: '#555555', marginTop: '1px' }}>
-                {sub.provider_domain}
-              </div>
+              <div className={styles.domain}>{sub.provider_domain}</div>
             )}
           </div>
         </div>
 
-        {/* Right: amount + annual hint + badge */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
-          <div style={{ fontWeight: '500', fontSize: '15px' }}>
+        <div className={styles.cardRight}>
+          <div className={styles.amount}>
             {formatAmount(sub.amount, sub.currency, sub.billing_cadence)}
           </div>
-          {annualHint && (
-            <div style={{ fontSize: '11px', color: '#555555' }}>
-              {annualHint}
-            </div>
-          )}
+          {annualHint && <div className={styles.annualHint}>{annualHint}</div>}
           <StatusBadge status={sub.status} />
         </div>
       </div>
 
-      {/* Bottom: renewal + trial countdown + difficulty + cancel link */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginTop: '12px',
-        paddingTop: '12px',
-        borderTop: '1px solid #1e1e1e',
-        gap: '12px',
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+      <div className={styles.cardBottom}>
+        <div className={styles.cardBottomLeft}>
           {renewal ? (
-            <span style={{ fontSize: '13px', color: renewal.overdue ? '#f87171' : '#888888' }}>
+            <span className={`${styles.renewal} ${renewal.overdue ? styles.renewalOverdue : ''}`}>
               {renewal.relative} · {renewal.absolute}
             </span>
           ) : (
-            <span style={{ fontSize: '13px', color: '#444444' }}>No renewal date</span>
+            <span className={styles.noRenewal}>No renewal date</span>
           )}
           {sub.status === 'trial' && (
             <TrialCountdown cancel_by_at={sub.cancel_by_at} trial_ends_at={sub.trial_ends_at} />
@@ -231,35 +194,11 @@ function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean
 
         <div>
           {sub.cancellation_url ? (
-            <a
-              href={sub.cancellation_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: '13px',
-                color: '#cccccc',
-                padding: '4px 10px',
-                border: '1px solid #3a3a3a',
-                borderRadius: '4px',
-                display: 'inline-block',
-              }}
-            >
+            <a href={sub.cancellation_url} target="_blank" rel="noopener noreferrer" className={styles.cancelLink}>
               Cancel →
             </a>
           ) : (
-            <a
-              href={cancelSearchUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: '13px',
-                color: '#555555',
-                padding: '4px 10px',
-                border: '1px solid #2a2a2a',
-                borderRadius: '4px',
-                display: 'inline-block',
-              }}
-            >
+            <a href={cancelSearchUrl} target="_blank" rel="noopener noreferrer" className={styles.howToCancelLink}>
               How to cancel
             </a>
           )}
@@ -310,30 +249,22 @@ export default async function HomePage() {
   const currencyLabel = hasNonUsd ? ' (USD)' : ''
 
   return (
-    <div style={{ minHeight: '100vh', padding: '40px 20px' }}>
-      <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+    <div className={styles.page}>
+      <div className={styles.inner}>
 
-        {/* Page header */}
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{
-            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-            gap: '16px', flexWrap: 'wrap', marginBottom: '16px',
-          }}>
-            <h1 style={{ fontSize: '28px', fontWeight: '600' }}>Your Subscriptions</h1>
+        <div className={styles.header}>
+          <div className={styles.headerTop}>
+            <h1 className={styles.title}>Your Subscriptions</h1>
             {(monthlyBurn > 0 || annualBurn > 0) && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+              <div className={styles.burns}>
                 {monthlyBurn > 0 && (
-                  <span style={{ fontSize: '16px', fontWeight: '500', color: '#cccccc' }}>
-                    {formatCurrency(monthlyBurn)}/mo{currencyLabel}
-                  </span>
+                  <span className={styles.burnMonthly}>{formatCurrency(monthlyBurn)}/mo{currencyLabel}</span>
                 )}
                 {annualBurn > 0 && (
-                  <span style={{ fontSize: '13px', color: '#666666' }}>
-                    {formatCurrency(annualBurn)}/yr{currencyLabel}
-                  </span>
+                  <span className={styles.burnAnnual}>{formatCurrency(annualBurn)}/yr{currencyLabel}</span>
                 )}
                 {savingsPotential > 0 && (
-                  <span style={{ fontSize: '11px', color: '#4a7c5a', marginTop: '2px' }}>
+                  <span className={styles.burnSavings}>
                     Switch to annual · save ~{formatCurrency(savingsPotential)}/yr (est.)
                   </span>
                 )}
@@ -342,49 +273,32 @@ export default async function HomePage() {
           </div>
 
           {aliasEmail && (
-            <div style={{
-              background: '#111111',
-              border: '1px solid #2a2a2a',
-              borderRadius: '8px',
-              padding: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-            }}>
+            <div className={styles.aliasRow}>
               <div>
-                <div style={{ fontSize: '11px', color: '#555555', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Forward subscription emails to
-                </div>
-                <div style={{ fontSize: '14px', fontFamily: 'monospace', color: '#cccccc' }}>
-                  {aliasEmail}
-                </div>
+                <div className={styles.aliasLabel}>Forward subscription emails to</div>
+                <div className={styles.aliasText}>{aliasEmail}</div>
               </div>
               <CopyButton text={aliasEmail} />
             </div>
           )}
         </div>
 
-        {/* Empty state */}
         {subscriptions.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '64px 20px', color: '#444444' }}>
-            <div style={{ fontSize: '16px', marginBottom: '10px', color: '#666666' }}>
-              No subscriptions found yet.
-            </div>
+          <div className={styles.empty}>
+            <div className={styles.emptyTitle}>No subscriptions found yet.</div>
             {aliasEmail && (
-              <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
+              <div className={styles.emptyBody}>
                 Forward any subscription receipt to{' '}
-                <span style={{ fontFamily: 'monospace', color: '#888888' }}>{aliasEmail}</span>
+                <span className={styles.emptyAlias}>{aliasEmail}</span>
                 {' '}to get started.
               </div>
             )}
           </div>
         )}
 
-        {/* Active subscriptions */}
         {active.length > 0 && (
-          <div style={{ marginBottom: cancelled.length > 0 ? '40px' : 0 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div className={styles.activeSection}>
+            <div className={styles.list}>
               {active.map(sub => (
                 <SubscriptionCard key={sub.id} sub={sub} />
               ))}
@@ -392,16 +306,10 @@ export default async function HomePage() {
           </div>
         )}
 
-        {/* Cancelled subscriptions */}
         {cancelled.length > 0 && (
           <div>
-            <div style={{
-              fontSize: '11px', color: '#444444', marginBottom: '12px',
-              textTransform: 'uppercase', letterSpacing: '0.08em',
-            }}>
-              Cancelled
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className={styles.cancelledLabel}>Cancelled</div>
+            <div className={styles.list}>
               {cancelled.map(sub => (
                 <SubscriptionCard key={sub.id} sub={sub} dimmed />
               ))}

@@ -406,6 +406,8 @@ Email content (text-forward, minimal styling):
 
 Replace [app/page.tsx](../app/page.tsx) placeholder.
 
+**Styling:** CSS Module (`app/page.module.css`). Structural + static styles go in the module (Figma CSS exports paste directly). Computed colors (difficulty dots, trial countdown urgency) stay inline since they are runtime values, not design tokens.
+
 **Data fetching:** Server component. Fetch explicit columns (not `SELECT *`) to keep the type contract explicit:
 ```sql
 SELECT s.id, s.display_name, s.provider_domain, s.amount, s.currency,
@@ -541,7 +543,8 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `app/api/cron/parse-sweep/route.ts` | New | Retry sweep for pending receipts |
 | `app/api/cron/renewal-reminders/route.ts` | New | Daily reminder dispatch |
 | `lib/email/index.ts` | New | Mailgun client + email templates |
-| `app/page.tsx` | Rewrite | Subscription catalog UI |
+| `app/page.tsx` | Rewrite | Subscription catalog UI (server component) |
+| `app/page.module.css` | New | CSS Module for catalog UI — structural styles; Figma-friendly |
 | `app/components/CopyButton.tsx` | New | Client component for alias email clipboard button |
 | `supabase/migrations/20260505_000000_reboot_schema.sql` | New | Full schema DDL + removals + soundings_log |
 | `supabase/migrations/20260505_000001_merchant_enrichment.sql` | New | `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` on merchants + subscriptions |
