@@ -381,15 +381,26 @@ Flow:
 - For each: send renewal reminder email via Mailgun
 - Return `{ sent: N }`
 
+**`app/api/cron/admin-digest/route.ts`:**
+- Authenticated by `x-cron-secret` header
+- Query: `parser_runs WHERE needs_review = true AND reviewed_at IS NULL ORDER BY created_at DESC LIMIT 50`
+- Join `inbound_receipts` for `from_domain` and `subject`
+- If count = 0: return `{ sent: false, count: 0 }` — no email fires
+- Send digest to `ADMIN_EMAIL` via `sendAdminReviewDigest`
+- Return `{ sent: true, count: N }`
+- Admin clears runs by setting `reviewed_at` in the DB
+
 Cron schedules in `wrangler.toml`:
 - `*/5 * * * *` → parse-sweep
+- `0 8 * * *` → admin-digest (8am UTC, before renewal reminders)
 - `0 9 * * *` → renewal-reminders (9am UTC; future: per-user timezone)
 
 ### Phase 5 — Notification Emails
 
 **`lib/email/index.ts`** — Mailgun client wrapper:
 - `sendNewSubscriptionEmail(to, subscription)` — fires after parser writes a new subscription
-- `sendRenewalReminderEmail(to, subscription, daysUntilRenewal)` — fires from cron
+- `sendRenewalReminderEmail(to, subscription, daysUntilRenewal)` — fires from renewal-reminders cron
+- `sendAdminReviewDigest(to, runs[])` — fires from admin-digest cron; lists all unreviewed `needs_review` parser runs
 
 Email content (text-forward, minimal styling):
 
@@ -542,6 +553,7 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `lib/parse-trigger.ts` | New | Shared helper for calling /api/parse |
 | `app/api/cron/parse-sweep/route.ts` | New | Retry sweep for pending receipts |
 | `app/api/cron/renewal-reminders/route.ts` | New | Daily reminder dispatch |
+| `app/api/cron/admin-digest/route.ts` | New | Daily admin digest for needs_review parser runs |
 | `lib/email/index.ts` | New | Mailgun client + email templates |
 | `app/page.tsx` | Rewrite | Subscription catalog UI (server component) |
 | `app/page.module.css` | New | CSS Module for catalog UI — structural styles; Figma-friendly |
@@ -564,6 +576,7 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `MAILGUN_API_KEY` | Outbound emails (same account as inbound) |
 | `PARSE_SECRET` | Auth header for `/api/parse` |
 | `CRON_SECRET` | Auth header for cron routes |
+| `ADMIN_EMAIL` | Recipient for daily admin digest (needs_review parser runs) |
 | `WORKERS_URL` | Base URL for internal fetches in `src/worker.ts` |
 
 All go in `.dev.vars` locally and Cloudflare dashboard secrets for production.
