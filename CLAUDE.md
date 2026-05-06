@@ -43,18 +43,18 @@ src/
   worker.ts            CF Worker entry: wraps OpenNext fetch + scheduled cron handler
 supabase/
   migrations/          All schema DDL (run in order; db reset rebuilds from here)
-  seed.sql             Top ~50 merchants: cancellation URL, difficulty, annual_discount_pct (Phase 7)
+  seed.sql             Top ~50 products: cancellation URL, difficulty, pricing data (Phase 7)
 ```
 
 ## Database Schema (key tables)
 - `pods` — subscription group, one per user; holds `alias_email`
 - `profiles` — user profile; `auth_user_id` links to `auth.users`
-- `merchants` — canonical merchant data: `name`, `website`, `aliases[]`, `cancellation_url`, `cancellation_difficulty` (1–5), `annual_discount_pct` (Phase 7 adds last three columns)
+- `products` — one row per product (e.g. YouTube, Google One, Spotify Premium — not one per company); `name`, `website`, `aliases[]`, `cancellation_url`, `cancellation_difficulty` (1–5), `cancellation_steps`, `parent_product_id` (corporate grouping), `pricing jsonb` (`[{period, price, currency}]`), `enrichment_status` (`pending | enriched | fetch_failed`)
 - `inbound_receipts` — raw email signals; `parser_status` = `pending | parsed | ignored | error`
 - `parser_runs` — control plane, one row per parse attempt; links to `inbound_receipts`
 - `soundings_log` — data plane, one row per extracted signal; `parser_run_id` FK; `resolved_subscription_id` set after matching
-- `subscriptions` — normalized current state per user; `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` denormalized from `merchants` at parse time
-- `subscription_cycles` — billing history
+- `subscriptions` — identity + current state roll-up; no financial columns; `current_cycle_id` FK points to the most recent `subscription_cycles` row; `product_id`, `cancellation_url`, `cancellation_difficulty` denormalized from `products`
+- `subscription_cycles` — one row per billing event (including trials with `amount=0`); holds `amount`, `currency`, `billing_cadence`, `period_start`, `period_end`, `next_renewal_at`, `cancel_by_at`, `signal_type`, `source_sounding_id`
 
 ## Local Development
 ```bash

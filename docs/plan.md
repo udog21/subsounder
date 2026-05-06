@@ -128,6 +128,38 @@ subscription_cycles  billing history
 
 ---
 
+## Subscriptions Data Model
+
+`subscriptions` is a **roll-up / current-state view** of the subscription lifecycle. It holds identity and status only. All financial and temporal data lives in `subscription_cycles`.
+
+```
+subscriptions          identity + status + pointer to current cycle
+      ↓ 1:N
+subscription_cycles    one row per billing event (trial, receipt, renewal, cancellation)
+```
+
+**`subscriptions`** answers: _What service does this user have, and what is its current state?_
+- `display_name`, `provider_domain`, `plan_name`, `product_id` — identity
+- `status` (`active` | `trial` | `cancelled`) — explicitly set based on the latest signal type
+- `current_cycle_id` — FK to the most recent `subscription_cycles` row; UI reads amount/currency/dates through this join
+- `cancellation_url`, `cancellation_difficulty` — denormalized from `products` at parse time
+- `canceled_at`, `reminder_enabled`, `pod_id`
+
+**`subscription_cycles`** answers: _What did we observe in this billing period?_
+- One row per parsed billing event, including trials (amount = 0)
+- `signal_type` — mirrors the sounding signal type: `trial_start`, `receipt`, `renewal_notice`, `charge`, `cancellation_confirm`, etc.
+- `amount`, `currency`, `billing_cadence` — what the user actually paid (or 0 for trials)
+- `period_start`, `period_end`, `next_renewal_at`, `cancel_by_at` — temporal bounds of this cycle
+- `source_sounding_id` — FK to `soundings_log`; traces back to the raw email signal
+
+**Why this split:** A user's actual paid amount may differ from any published price (loyalty discounts, promotional rates, grandfathered plans). Storing the billed amount on `subscription_cycles` keeps it authoritative and per-event. `subscriptions.amount` would be stale the moment a price change arrives; reading through `current_cycle_id` is always correct.
+
+**The `current_cycle_id` pattern:** Avoids a `MAX(created_at)` subquery on every page render. After writing a new `subscription_cycles` row, the parse route updates `subscriptions.current_cycle_id` to point to it. UI query joins on a primary key — effectively free.
+
+**Circular FK constraint:** `subscriptions.current_cycle_id → subscription_cycles.id` and `subscription_cycles.subscription_id → subscriptions.id` form a mutual FK. Currently `current_cycle_id` is nullable so the parse route uses a two-step write (insert subscription → insert cycle → update `current_cycle_id`). A cleaner future migration makes both FKs `DEFERRABLE INITIALLY DEFERRED`, allowing subscription + cycle to be inserted in a single atomic transaction with no intermediate nullable state. A subscription with no cycle should not exist.
+
+---
+
 ## LLM Extraction Output Schema
 
 GPT-4 mini is asked to return an **array** of signals from day one — even if most emails produce exactly one. This correctly models the 1:N reality and avoids a schema migration when bundle/statement parsing is added.
@@ -334,12 +366,11 @@ New helper: `lib/parse-trigger.ts` — shared function used by both the inbound 
   - Billed-by domain exact match: 35 pts
   - Display name fuzzy match (normalized, punctuation-stripped): 25 pts
   - Plan name match: 15 pts
-  - Amount + currency match: 10 pts
-  - Threshold to match: 60 pts
+  - Threshold to match: 60 pts (amount removed from scoring — user may be on non-standard pricing)
 - Content-date-aware update policy:
   - Signal's `event_date` > existing `last_observed_content_date`: update all non-null fields
   - Signal's `event_date` ≤ existing: update only fields currently NULL on existing record
-- Return: `{ action: 'insert' | 'update' | 'skip', matched_id?: string, payload: SubscriptionUpsert }`
+- Return: `{ action: 'insert' | 'update' | 'skip', matched_id?: string, subscriptionPayload, cyclePayload }`
 
 **`app/api/parse/route.ts`** — orchestrator:
 
@@ -360,10 +391,15 @@ Flow:
 8. Insert `parser_runs` row (status, classification, confidence, input_hash, input_excerpt, output_json, model_name, parser_name, parser_version, prompt_version)
 9. For each signal in `extraction.signals`:
    a. Insert `soundings_log` row (all signal fields, `parser_run_id`, `pod_id`, `inbound_receipt_id`)
-   b. Run `match.ts` against existing pod subscriptions
-   c. Insert or update `subscriptions`
-   d. Update `soundings_log` row: set `resolved_subscription_id`, `write_action`
-   e. If `action = 'insert'`: enqueue "new subscription" email (fire-and-forget)
+   b. Run `match.ts` against existing pod subscriptions → `{ action, matched_id?, subscriptionPayload, cyclePayload }`
+   c. **Product match**: query `products` by `website = signal.merchant_domain` (exact lowercase)
+      - If found: note `product_id`, copy `cancellation_url` + `cancellation_difficulty`
+      - If not found: insert new `products` row (`name = signal.merchant_name`, `website = signal.merchant_domain`, `enrichment_status = 'pending'`)
+   d. Insert or update `subscriptions` (identity fields + `status` + `product_id` + `cancellation_url` + `cancellation_difficulty`); no `amount`/`currency` on this table
+   e. Insert `subscription_cycles` row (`amount`, `currency`, `billing_cadence`, `signal_type`, `period_start`, `period_end`, `next_renewal_at`, `cancel_by_at`, `source_sounding_id`, `subscription_id`)
+   f. Update `subscriptions.current_cycle_id` to point to the new cycle row
+   g. Update `soundings_log` row: set `resolved_subscription_id`, `write_action`
+   h. If `action = 'insert'`: enqueue "new subscription" email (fire-and-forget)
 10. Update `parser_runs.actions`: `{ soundings_written: N, subscriptions_inserted: M, subscriptions_updated: P, subscriptions_skipped: Q }`
 11. Update `inbound_receipts`: `parser_status = 'parsed'`, `last_parser_run_id`, `resolved_subscription_id` (first matched), `write_decision`, `write_reason`, `processed_at`
 
@@ -390,8 +426,20 @@ Flow:
 - Return `{ sent: true, count: N }`
 - Admin clears runs by setting `reviewed_at` in the DB
 
+**`app/api/cron/product-enrichment/route.ts`:**
+- Authenticated by `x-cron-secret` header
+- Query: `SELECT id, name, website FROM products WHERE enrichment_status = 'pending' AND website IS NOT NULL LIMIT 10`
+- For each product:
+  - Fetch `{website}/pricing` (or root domain) via plain `fetch()`
+  - Strip HTML → plaintext (reuse `normalize.ts` strip logic)
+  - Call Claude (Haiku — simple structured task) to extract `pricing: [{period, price, currency}]`
+  - If fetch fails or returns empty (JS-rendered page): set `enrichment_status = 'fetch_failed'`; Firecrawl fallback handled by a future retry queue
+  - On success: update `products` row with `pricing` jsonb + `enrichment_status = 'enriched'` + `enriched_at = now()`
+- Return `{ enriched: N, failed: M }`
+
 Cron schedules in `wrangler.toml`:
 - `*/5 * * * *` → parse-sweep
+- `*/15 * * * *` → product-enrichment (runs often to clear new-product backlog quickly)
 - `0 8 * * *` → admin-digest (8am UTC, before renewal reminders)
 - `0 9 * * *` → renewal-reminders (9am UTC; future: per-user timezone)
 
@@ -419,119 +467,112 @@ Replace [app/page.tsx](../app/page.tsx) placeholder.
 
 **Styling:** CSS Module (`app/page.module.css`). Structural + static styles go in the module (Figma CSS exports paste directly). Computed colors (difficulty dots, trial countdown urgency) stay inline since they are runtime values, not design tokens.
 
-**Data fetching:** Server component. Fetch explicit columns (not `SELECT *`) to keep the type contract explicit:
+**Data fetching:** Server component. Join `subscription_cycles` via `current_cycle_id` for financial/temporal data — never read `amount`/`currency`/dates directly from `subscriptions`.
+
 ```sql
-SELECT s.id, s.display_name, s.provider_domain, s.amount, s.currency,
-       s.billing_cadence, s.next_renewal_at, s.trial_ends_at, s.cancel_by_at,
-       s.status, s.cancellation_url, s.cancellation_difficulty, s.canceled_at,
+SELECT s.id, s.display_name, s.provider_domain, s.status,
+       s.cancellation_url, s.cancellation_difficulty, s.canceled_at,
+       sc.amount, sc.currency, sc.billing_cadence,
+       sc.next_renewal_at, sc.cancel_by_at, sc.period_end AS trial_ends_at,
        pod.alias_email
 FROM subscriptions s
+JOIN subscription_cycles sc ON sc.id = s.current_cycle_id
 JOIN pods pod ON pod.id = s.pod_id
 JOIN profiles p ON p.pod_id = pod.id
 WHERE p.auth_user_id = auth.uid()
-ORDER BY s.next_renewal_at ASC NULLS LAST
+ORDER BY sc.next_renewal_at ASC NULLS LAST
 ```
 
-**Analytics helpers (pure functions, inline in page.tsx):**
-
-`toMonthly(amount, cadence)` — normalize any cadence to monthly equivalent (daily × 30, weekly × 4.33, monthly × 1, quarterly ÷ 3, annual ÷ 12, one_time → 0)
-
-`annualEquivalent(subs)` — sum of `toMonthly() × 12` for USD active subscriptions with known amount
-
-`annualSavingsPotential(subs)` — sum of `amount × 12 × (annual_discount_pct / 100)` for USD active subscriptions where `billing_cadence = 'monthly'` and `annual_discount_pct` is non-null. Only shows when at least one qualifying subscription has merchant-sourced discount data (Phase 7). Until Phase 7 seed data is live, this line is hidden.
-
-Multi-currency: only USD subscriptions count toward dollar totals. Non-USD subscriptions still appear in the list. If any non-USD active subscriptions exist, append "(USD)" to the header totals.
-
-**Page header — analytics block:**
+**Page header:**
 
 ```
-Your Subscriptions                    $127/mo
-                                   $1,524/yr
-                     Switch to annual · save ~$254/yr (est.)
+Your Subscriptions              $1,524/yr
+Forward subscription emails to: alias@inbound.subsounder.com  [copy]
 ```
 
-- Monthly figure: prominent (16px, `#cccccc`)
-- Annual figure: secondary (13px, `#666666`)
-- Savings line: only shown when `annualSavingsPotential > 0` (requires Phase 7 merchant data); muted green (`#4a7c5a`), 11px, prefixed "Switch to annual · save ~$X/yr (est.)"
-- Alias email row: "Forward subscription emails to: `alias@inbound.subsounder.com` [copy]"
+- Annual spend total (sum of USD active subscriptions, normalized to annual): prominent
+- Multi-currency: only USD subscriptions count; if non-USD active subscriptions exist, append "(USD)"
+- No savings or analytics in the header — those belong on the analysis page (post-MVP)
 
 **Per subscription card:**
-- Display name + `provider_domain` (favicon via Google S2 if available; fallback: first letter in grey box)
-- `amount` + `currency` + `billing_cadence` formatted ("$9.99/month")
-- If `billing_cadence = 'monthly'` and `annual_discount_pct` is non-null (and not dimmed): muted secondary line "~$[amount × 12 × (pct / 100)]/yr savings with annual plan" — sourced from merchant data (Phase 7); hidden until populated
+- Display name + `provider_domain` (favicon via Google S2; fallback: first letter in grey box)
+- `amount` + `currency` + `billing_cadence` formatted ("$9.99/month") — from current cycle
 - Status badge: `active` | `trial` | `cancelled`
 - Next renewal: relative ("in 23 days") + absolute date
 - **Trial countdown** (only when `status = 'trial'`):
-  - If `cancel_by_at` is set → "Cancel by [date] · N days left" (higher urgency — deadline to avoid charge)
+  - If `cancel_by_at` is set → "Cancel by [date] · N days left" (urgent — deadline to avoid charge)
   - Else if `trial_ends_at` is set → "Trial ends [date] · N days left"
   - `days = Math.ceil((deadline - Date.now()) / 86_400_000)`
   - Color: ≤ 3 days → red (`#f87171`), ≤ 7 days → amber (`#fbbf24`), > 7 days → muted (`#666666`)
-  - Placement: in bottom row alongside renewal date, before difficulty dots
 - Cancellation difficulty: 1–5 dots, color-coded (green ≤ 2, amber = 3, red ≥ 4)
-- Cancellation link: `[Cancel →]` pointing to `cancellation_url` (if set); else `[How to cancel]` linking to Google search for "[display_name] cancel subscription"
+- Cancel button: `[Cancel →]` → `cancellation_url` (if set); else `[How to cancel]` → Google search for "[display_name] cancel subscription"
 
 **Empty state:** "Forward any subscription receipt to `<alias>` to get started."
 
-**Cancelled subscriptions:** Shown below active ones at 45% opacity. No annual hint shown on dimmed cards.
+**Cancelled subscriptions:** Shown below active ones at 45% opacity.
 
-**Post-MVP analytics (defer):**
-- Projected spend for remaining current year (requires looping through renewal dates against year-end; noisy without billing history)
-- "SubSounder ROI" callout: "Tracking $X/yr — SubSounder costs $50/yr" (add once pricing is live in DB)
-- Category breakdown, month-over-month trends, savings-confirmed counter from cancellations
+_No savings hints, break-even math, or annual-switch prompts on this page — those belong on the Analysis page (see Post-MVP roadmap)._
 
-### Phase 7 — Cancellation Seed Data & Merchant Enrichment
+### Phase 7 — Cancellation Seed Data & Product Enrichment
 
-**Migration** (`supabase/migrations/20260505_000001_merchant_enrichment.sql`):
+**Migration** (`supabase/migrations/20260505_000002_product_enrichment.sql`):
+
+`cancellation_url` and `cancellation_difficulty` already exist on `products` and `subscriptions`. This migration adds:
 
 ```sql
-ALTER TABLE merchants
-  ADD COLUMN IF NOT EXISTS cancellation_url      text,
-  ADD COLUMN IF NOT EXISTS cancellation_difficulty smallint,   -- 1 (easy) – 5 (hard)
-  ADD COLUMN IF NOT EXISTS annual_discount_pct   smallint;    -- e.g. 20 = 20% off annual
+-- Pricing tiers: [{period: 'monthly'|'annual'|'quarterly', price: 9.99, currency: 'USD'}]
+-- Populated by product-enrichment cron; null until enriched.
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS pricing            jsonb,
+  ADD COLUMN IF NOT EXISTS enrichment_status  text DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS enriched_at        timestamptz;
 
+-- current_cycle_id: pointer to the most recent subscription_cycles row
+-- avoids MAX(created_at) subquery on every catalog render
 ALTER TABLE subscriptions
-  ADD COLUMN IF NOT EXISTS annual_discount_pct   smallint;    -- denormalized from merchants at parse time
+  ADD COLUMN IF NOT EXISTS current_cycle_id   uuid REFERENCES subscription_cycles(id);
+
+-- Remove financial/temporal columns that now live on subscription_cycles
+ALTER TABLE subscriptions
+  DROP COLUMN IF EXISTS amount,
+  DROP COLUMN IF EXISTS currency,
+  DROP COLUMN IF EXISTS billing_cadence,
+  DROP COLUMN IF EXISTS next_renewal_at,
+  DROP COLUMN IF EXISTS trial_ends_at,
+  DROP COLUMN IF EXISTS cancel_by_at,
+  DROP COLUMN IF EXISTS last_billed_at;
+
+-- Enrich subscription_cycles with signal provenance and temporal completeness
+ALTER TABLE subscription_cycles
+  ADD COLUMN IF NOT EXISTS signal_type        text,
+  ADD COLUMN IF NOT EXISTS next_renewal_at    timestamptz,
+  ADD COLUMN IF NOT EXISTS cancel_by_at       timestamptz,
+  ADD COLUMN IF NOT EXISTS source_sounding_id uuid REFERENCES soundings_log(id);
+
+-- Rename start_at/end_at → period_start/period_end for clarity
+ALTER TABLE subscription_cycles
+  RENAME COLUMN start_at TO period_start;
+ALTER TABLE subscription_cycles
+  RENAME COLUMN end_at TO period_end;
 ```
 
-**Seed file** (`supabase/seed.sql`) — top ~50 merchants, safe to re-run:
+**Seed file** (`supabase/seed.sql`) — top ~50 products, safe to re-run (curated manually; enrichment cron fills `pricing` jsonb automatically for the rest):
 
 ```sql
-INSERT INTO merchants (name, website, aliases, cancellation_url, cancellation_difficulty, annual_discount_pct)
+INSERT INTO products (name, website, aliases, cancellation_url, cancellation_difficulty, enrichment_status)
 VALUES
-  ('Netflix',  'netflix.com',  '{}', 'https://www.netflix.com/cancelplan', 1, NULL),
-  ('Spotify',  'spotify.com',  '{}', 'https://www.spotify.com/account/subscription/cancel', 2, 17),
-  ('Adobe',    'adobe.com',    '{"Adobe Creative Cloud"}', 'https://account.adobe.com/plans', 4, 40),
+  ('Netflix',               'netflix.com',  '{}',              'https://www.netflix.com/cancelplan', 1, 'enriched'),
+  ('Spotify Premium',       'spotify.com',  '{}',              'https://www.spotify.com/account/subscription/cancel', 2, 'enriched'),
+  ('Adobe Creative Cloud',  'adobe.com',    '{"Adobe"}',       'https://account.adobe.com/plans', 4, 'enriched'),
   -- ... top 50 total
 ON CONFLICT (lower(name)) DO UPDATE SET
-  cancellation_url       = EXCLUDED.cancellation_url,
-  cancellation_difficulty = EXCLUDED.cancellation_difficulty,
-  annual_discount_pct    = EXCLUDED.annual_discount_pct;
+  cancellation_url        = EXCLUDED.cancellation_url,
+  cancellation_difficulty = EXCLUDED.cancellation_difficulty;
 ```
 
-**Parser enrichment** (`app/api/parse/route.ts`) — after subscription insert/update, if a merchant domain match exists:
+**Product matching** (now part of parse flow — see Phase 3 step 9c): product rows are created organically when new services are first encountered. Seeded rows cover the most common ones; the enrichment cron handles the rest.
 
-```typescript
-// domain-match merchants table (exact lower() comparison on website column)
-const { data: merchant } = await svc
-  .from('merchants')
-  .select('cancellation_url, cancellation_difficulty, annual_discount_pct')
-  .ilike('website', `%${signal.merchant_domain}%`)
-  .limit(1)
-  .single()
-
-if (merchant) {
-  await svc.from('subscriptions').update({
-    cancellation_url:        merchant.cancellation_url,
-    cancellation_difficulty: merchant.cancellation_difficulty,
-    annual_discount_pct:     merchant.annual_discount_pct,
-  }).eq('id', subscriptionId)
-}
-```
-
-**UI update** (`app/page.tsx`) — remove the hardcoded `amount × 10` estimate; replace with merchant-sourced data:
-
-- `annualHint` on card: only shown when `sub.annual_discount_pct != null`; formula `amount × 12 × (pct / 100)`
-- `annualSavingsPotential` in header: same — sum only subscriptions where `annual_discount_pct` is non-null
+**UI update** (`app/page.tsx`) — savings hints and break-even math belong on the Analysis page (post-MVP), not the catalog. No per-card pricing annotations needed for Phase 7. The catalog simply shows the user's actual billed amount from `subscription_cycles` via `current_cycle_id`.
 
 Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 
@@ -559,8 +600,9 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `app/page.module.css` | New | CSS Module for catalog UI — structural styles; Figma-friendly |
 | `app/components/CopyButton.tsx` | New | Client component for alias email clipboard button |
 | `supabase/migrations/20260505_000000_reboot_schema.sql` | New | Full schema DDL + removals + soundings_log |
-| `supabase/migrations/20260505_000001_merchant_enrichment.sql` | New | `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` on merchants + subscriptions |
-| `supabase/seed.sql` | New | Top ~50 merchants: cancellation URL, difficulty, annual discount % |
+| `supabase/migrations/20260505_000002_product_enrichment.sql` | New | `pricing jsonb` + `enrichment_status` on `products`; `current_cycle_id` on `subscriptions`; drop financial columns from `subscriptions`; add `signal_type`/`next_renewal_at`/`cancel_by_at`/`source_sounding_id` to `subscription_cycles`; rename `start_at`→`period_start`, `end_at`→`period_end` |
+| `app/api/cron/product-enrichment/route.ts` | New | Scrape pricing pages for pending products; Claude Haiku extraction; Firecrawl fallback for JS-rendered pages |
+| `supabase/seed.sql` | New | Top ~50 products: cancellation URL, difficulty, pricing data |
 
 ---
 
@@ -632,7 +674,42 @@ Claude tests the backend end-to-end locally and reports results. You verify the 
 | **2** | Gmail OAuth ingestion (via `email_connections` table), PDF/image upload via GPT-4 Vision |
 | **3** | Assisted cancellation flows (step-by-step per provider), subscription history timeline |
 | **4** | Bank statement parsing, autonomous cancellation, cross-signal matching |
-| **Ongoing** | Cancellation difficulty dataset — enriched by every parsed email |
+| **Ongoing** | Cancellation difficulty dataset — enriched by every parsed email and user report |
+
+### Analysis Page (post-MVP)
+
+A separate `/analyze` route — keeps the catalog clean. Intended content:
+
+**Annual savings opportunities**
+- Per subscription: compare user's actual paid cadence (from `subscription_cycles`) against the product's published annual price (from `products.pricing`)
+- Suppress estimate if user's observed monthly price diverges more than ~20% from published monthly — their pricing is non-standard and the comparison would mislead
+- For each qualifying subscription: "Switch [Service] to annual — save ~$X/yr (based on published pricing)"
+- **Break-even framing**: `break_even_months = published_annual_price / user_monthly_amount` → "Worth switching if you keep it past month N"
+- Layered with cancellation difficulty: high difficulty + annual commitment = higher risk; surface this explicitly ("Cancellation is rated 4/5 — factor that in before committing")
+
+**Spend summary**
+- Total annual spend (USD active subscriptions)
+- "SubSounder ROI" callout — defer until SubSounder pricing is live in DB
+
+**Post-MVP analytics (defer further)**
+- Category breakdown, month-over-month trends, savings-confirmed counter after cancellations
+- Projected remaining spend for current calendar year
+
+### Cancellation Difficulty Dataset
+
+The `cancellation_difficulty` (1–5) and `cancellation_steps` (prose) columns on `products` are a data moat. Three collection layers:
+
+**Layer 1 — Manual seed (launch)**
+Top 50 products curated by the team. Difficulty rating + `cancellation_url` + brief `cancellation_steps` prose.
+
+**Layer 2 — Gig workers (scale)**
+Upwork or Mechanical Turk brief: "Attempt to cancel [service], screenshot every page/screen before clicking, count distinct steps, note if phone or chat is required." Rate: $3–8 per product. Validation: require screenshots as deliverable (they double as a cancellation guide), cross-reference at least 2 workers per product before publishing. Screenshots become the `cancellation_steps` content — shown to users as a step-by-step cancellation guide.
+
+**Layer 3 — User reports (flywheel)**
+After a user marks a subscription cancelled: prompt "How many steps did it take? Rate the difficulty (1–5)." Incentive option: "Share your experience and get 1 month of SubSounder free." Aggregate user ratings update `cancellation_difficulty`; outlier submissions flagged for manual review.
+
+**Automated signals (no login needed)**
+Claude can fetch and score the cancellation URL without authenticating: does it lead to a self-serve cancellation page, a support/chat page, or a phone number? Does the page contain dark-pattern language ("pause instead", fear/uncertainty copy)? These signals contribute to an automated difficulty pre-score before human validation.
 
 ---
 
@@ -643,11 +720,12 @@ Claude tests the backend end-to-end locally and reports results. You verify the 
 | 0 | `wrangler dev` boots; login flow completes in Workers runtime; `@supabase/ssr` compatibility confirmed |
 | 1 | `supabase db reset` succeeds cleanly with all migrations; `soundings_log` table exists; dead columns gone |
 | 2 | POST Mailgun test payload → `inbound_receipts` row has `from_domain`, `source_type`, `profile_id`, correct `content_date`; `parser_status = 'pending'`; `/api/parse` called via `after()` |
-| 3 | POST `{ receipt_id, pod_id }` to `/api/parse` directly → `parser_runs` row written, `soundings_log` row(s) written, `subscriptions` row created with `display_name`/`amount`/`next_renewal_at`; receipt `parser_status = 'parsed'` |
+| 3 | POST `{ receipt_id, pod_id }` to `/api/parse` directly → `parser_runs` row written, `soundings_log` row(s) written, `subscription_cycles` row written with `amount`/`currency`/`next_renewal_at`, `subscriptions` row created with `current_cycle_id` set; `products` row created or matched with `product_id` linked; receipt `parser_status = 'parsed'` |
 | 3b | POST same receipt_id again → returns `{ status: 'skipped' }`; no duplicate rows |
 | 4 | Trigger `/api/cron/parse-sweep` → pending receipts processed; check `parser_status` flips to `'parsed'` for each |
-| 4b | Set a subscription `next_renewal_at` to 3 days from now; trigger `/api/cron/renewal-reminders` → Mailgun email delivered to test inbox |
+| 4b | Set a `subscription_cycles.next_renewal_at` to 3 days from now (on the row pointed to by `subscriptions.current_cycle_id`); trigger `/api/cron/renewal-reminders` → Mailgun email delivered to test inbox |
 | 5 | Parser writes new subscription → "new subscription detected" email delivered within 30 seconds |
-| 6 | Log in → dashboard shows subscription list with alias, amounts, renewal dates; empty state shows alias email; cancellation links and annual savings hints visible for seeded merchants |
-| 7 | `supabase db reset` → merchants seeded; forward a Spotify renewal email → subscription row has `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` populated; dashboard shows savings hint |
+| 6 | Log in → dashboard shows subscription list with alias, amounts, renewal dates; empty state shows alias email; cancellation links visible; annual savings hints hidden until Phase 7 |
+| 7 | `supabase db reset` → products seeded; forward a Spotify renewal email → subscription row has `cancellation_url`, `cancellation_difficulty` + `product_id` populated; `subscription_cycles` row has correct `amount`, `billing_cadence`, `next_renewal_at`; catalog renders via `current_cycle_id` join |
+| 7c | Trigger `/api/cron/product-enrichment` with a pending product → `products.pricing` jsonb populated, `enrichment_status = 'enriched'` |
 | 7b | Forward a real Spotify renewal email to alias → end-to-end: receipt stored, parsed, subscription appears in dashboard, "new subscription" email received |

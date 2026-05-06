@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
       supabase
         .from('subscriptions')
         .select(
-          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, plan_name, amount, currency, last_observed_content_date, billing_cadence, next_renewal_at, cancel_by_at, status',
+          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, plan_name, last_observed_content_date, status',
         )
         .eq('pod_id', pod_id),
       supabase.from('profiles').select('email').eq('pod_id', pod_id).maybeSingle(),
@@ -206,13 +206,52 @@ export async function POST(req: NextRequest) {
 
       // b. Score against existing subscriptions
       const matchResult = match(signal, subs, pod_id)
+
+      // c. Product match: link existing product or create pending one
+      let productId: string | null = null
+      let cancellationUrl: string | null = null
+      let cancellationDifficulty: number | null = null
+
+      if (signal.merchant_domain) {
+        const domain = signal.merchant_domain.toLowerCase()
+        const { data: product } = await supabase
+          .from('products')
+          .select('id, cancellation_url, cancellation_difficulty')
+          .eq('website', domain)
+          .maybeSingle()
+
+        if (product) {
+          productId = product.id
+          cancellationUrl = product.cancellation_url
+          cancellationDifficulty = product.cancellation_difficulty
+        } else {
+          const { data: newProduct } = await supabase
+            .from('products')
+            .insert({
+              name: signal.merchant_name ?? domain,
+              website: domain,
+              enrichment_status: 'pending',
+            })
+            .select('id')
+            .single()
+          if (newProduct) productId = newProduct.id
+        }
+      }
+
+      // d. Insert or update subscription (identity + status only — no financial fields)
+      const subPayload = {
+        ...matchResult.subscriptionPayload,
+        ...(productId != null ? { product_id: productId } : {}),
+        ...(cancellationUrl != null ? { cancellation_url: cancellationUrl } : {}),
+        ...(cancellationDifficulty != null ? { cancellation_difficulty: cancellationDifficulty } : {}),
+      }
+
       let resolvedSubscriptionId: string | null = null
 
       if (matchResult.action === 'insert') {
-        // c. Insert new subscription
         const { data: newSub, error: subInsertError } = await supabase
           .from('subscriptions')
-          .insert(matchResult.payload)
+          .insert(subPayload)
           .select('id')
           .single()
 
@@ -221,26 +260,20 @@ export async function POST(req: NextRequest) {
           subscriptionsInserted++
           subs.push({
             id: newSub.id,
-            provider_name: matchResult.payload.provider_name,
-            provider_domain: matchResult.payload.provider_domain,
-            billed_by_name: matchResult.payload.billed_by_name,
-            billed_by_domain: matchResult.payload.billed_by_domain,
-            display_name: matchResult.payload.display_name,
-            plan_name: matchResult.payload.plan_name,
-            amount: matchResult.payload.amount,
-            currency: matchResult.payload.currency,
-            last_observed_content_date: matchResult.payload.last_observed_content_date,
-            billing_cadence: matchResult.payload.billing_cadence,
-            next_renewal_at: matchResult.payload.next_renewal_at,
-            cancel_by_at: matchResult.payload.cancel_by_at,
-            status: matchResult.payload.status,
+            provider_name: matchResult.subscriptionPayload.provider_name,
+            provider_domain: matchResult.subscriptionPayload.provider_domain,
+            billed_by_name: matchResult.subscriptionPayload.billed_by_name,
+            billed_by_domain: matchResult.subscriptionPayload.billed_by_domain,
+            display_name: matchResult.subscriptionPayload.display_name,
+            plan_name: matchResult.subscriptionPayload.plan_name,
+            last_observed_content_date: matchResult.subscriptionPayload.last_observed_content_date,
+            status: matchResult.subscriptionPayload.status,
           })
         }
       } else if (matchResult.action === 'update' && matchResult.matched_id) {
-        // c. Update existing subscription
         const { error: subUpdateError } = await supabase
           .from('subscriptions')
-          .update(matchResult.payload)
+          .update(subPayload)
           .eq('id', matchResult.matched_id)
 
         if (!subUpdateError) {
@@ -248,18 +281,38 @@ export async function POST(req: NextRequest) {
           subscriptionsUpdated++
           const idx = subs.findIndex((s) => s.id === matchResult.matched_id)
           if (idx >= 0) {
-            subs[idx] = { ...subs[idx], ...matchResult.payload, id: matchResult.matched_id }
+            subs[idx] = { ...subs[idx], ...matchResult.subscriptionPayload, id: matchResult.matched_id }
           }
         }
       } else {
         subscriptionsSkipped++
       }
 
+      // e. Write subscription_cycles row + f. Update current_cycle_id
+      if (resolvedSubscriptionId) {
+        const { data: newCycle } = await supabase
+          .from('subscription_cycles')
+          .insert({
+            subscription_id: resolvedSubscriptionId,
+            ...matchResult.cyclePayload,
+            source_sounding_id: sounding.id,
+          })
+          .select('id')
+          .single()
+
+        if (newCycle) {
+          await supabase
+            .from('subscriptions')
+            .update({ current_cycle_id: newCycle.id })
+            .eq('id', resolvedSubscriptionId)
+        }
+      }
+
       if (resolvedSubscriptionId && !firstResolvedSubscriptionId) {
         firstResolvedSubscriptionId = resolvedSubscriptionId
       }
 
-      // d. Update soundings_log with outcome
+      // g. Update soundings_log with outcome
       await supabase
         .from('soundings_log')
         .update({
@@ -268,15 +321,15 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', sounding.id)
 
-      // e. Send "new subscription" notification email (fire-and-forget)
-      if (matchResult.action === 'insert' && profileEmail) {
+      // h. Send "new subscription" notification email (fire-and-forget)
+      if (matchResult.action === 'insert' && profileEmail && resolvedSubscriptionId) {
         sendNewSubscriptionEmail(profileEmail, {
-          display_name: matchResult.payload.display_name,
-          amount: matchResult.payload.amount,
-          currency: matchResult.payload.currency,
-          billing_cadence: matchResult.payload.billing_cadence,
-          next_renewal_at: matchResult.payload.next_renewal_at,
-          cancellation_url: null,
+          display_name: matchResult.subscriptionPayload.display_name,
+          amount: matchResult.cyclePayload.amount,
+          currency: matchResult.cyclePayload.currency,
+          billing_cadence: matchResult.cyclePayload.billing_cadence,
+          next_renewal_at: matchResult.cyclePayload.next_renewal_at,
+          cancellation_url: cancellationUrl,
         }).catch((err) => console.error('[parse] new subscription email failed:', err))
       }
     }

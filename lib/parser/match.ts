@@ -8,11 +8,6 @@ export interface ExistingSubscription {
   billed_by_domain: string | null
   display_name: string
   plan_name: string | null
-  amount: number | null
-  currency: string | null
-  billing_cadence: string | null
-  next_renewal_at: string | null
-  cancel_by_at: string | null
   last_observed_content_date: string | null
   status: string
 }
@@ -25,11 +20,6 @@ export interface SubscriptionUpsert {
   billed_by_name: string | null
   billed_by_domain: string | null
   plan_name: string | null
-  amount: number | null
-  currency: string | null
-  billing_cadence: string | null
-  next_renewal_at: string | null
-  cancel_by_at: string | null
   last_observed_content_date: string | null
   last_source_type: string
   source: string
@@ -37,10 +27,21 @@ export interface SubscriptionUpsert {
   status: string
 }
 
+export interface CycleInsert {
+  signal_type: string
+  amount: number | null
+  currency: string | null
+  billing_cadence: string | null
+  period_start: string | null
+  next_renewal_at: string | null
+  cancel_by_at: string | null
+}
+
 export interface MatchResult {
   action: 'insert' | 'update' | 'skip'
   matched_id?: string
-  payload: SubscriptionUpsert
+  subscriptionPayload: SubscriptionUpsert
+  cyclePayload: CycleInsert
 }
 
 const MATCH_THRESHOLD = 60
@@ -91,21 +92,16 @@ function scoreMatch(signal: ExtractionSignal, existing: ExistingSubscription): n
     score += 15
   }
 
-  if (
-    signal.amount !== null &&
-    existing.amount !== null &&
-    Math.abs(signal.amount - existing.amount) < 0.01 &&
-    signal.currency &&
-    existing.currency &&
-    signal.currency.toUpperCase() === existing.currency.toUpperCase()
-  ) {
-    score += 10
-  }
-
   return score
 }
 
-function buildBasePayload(signal: ExtractionSignal, podId: string): SubscriptionUpsert {
+function deriveStatus(signalType: string): string {
+  if (signalType === 'cancellation_confirm') return 'cancelled'
+  if (signalType === 'trial_start') return 'trial'
+  return 'active'
+}
+
+function buildSubscriptionPayload(signal: ExtractionSignal, podId: string): SubscriptionUpsert {
   return {
     pod_id: podId,
     display_name: signal.merchant_name ?? signal.billed_by_name ?? 'Unknown',
@@ -114,20 +110,15 @@ function buildBasePayload(signal: ExtractionSignal, podId: string): Subscription
     billed_by_name: signal.billed_by_name,
     billed_by_domain: signal.billed_by_domain,
     plan_name: signal.plan_name,
-    amount: signal.amount,
-    currency: signal.currency,
-    billing_cadence: signal.billing_cadence,
-    next_renewal_at: signal.next_renewal_at,
-    cancel_by_at: signal.cancel_by_at,
     last_observed_content_date: signal.event_date,
     last_source_type: 'inbound_receipt',
     source: 'parser',
     confidence: signal.confidence,
-    status: signal.signal_type === 'cancellation_confirm' ? 'cancelled' : 'active',
+    status: deriveStatus(signal.signal_type),
   }
 }
 
-function buildUpdatePayload(
+function buildUpdateSubscriptionPayload(
   signal: ExtractionSignal,
   existing: ExistingSubscription,
   podId: string,
@@ -138,7 +129,7 @@ function buildUpdatePayload(
     : 0
   const isNewer = signalTs > existingTs
 
-  const base = buildBasePayload(signal, podId)
+  const base = buildSubscriptionPayload(signal, podId)
 
   if (isNewer) {
     return {
@@ -148,16 +139,11 @@ function buildUpdatePayload(
       billed_by_name: signal.billed_by_name ?? existing.billed_by_name,
       billed_by_domain: signal.billed_by_domain ?? existing.billed_by_domain,
       plan_name: signal.plan_name ?? existing.plan_name,
-      amount: signal.amount ?? existing.amount,
-      currency: signal.currency ?? existing.currency,
-      billing_cadence: signal.billing_cadence ?? existing.billing_cadence,
-      next_renewal_at: signal.next_renewal_at ?? existing.next_renewal_at,
-      cancel_by_at: signal.cancel_by_at ?? existing.cancel_by_at,
       last_observed_content_date: signal.event_date ?? existing.last_observed_content_date,
     }
   }
 
-  // Older signal: only fill fields that are currently null on the existing record
+  // Older signal: only fill fields currently null on the existing record
   return {
     ...base,
     provider_name: existing.provider_name ?? signal.merchant_name,
@@ -165,12 +151,19 @@ function buildUpdatePayload(
     billed_by_name: existing.billed_by_name ?? signal.billed_by_name,
     billed_by_domain: existing.billed_by_domain ?? signal.billed_by_domain,
     plan_name: existing.plan_name ?? signal.plan_name,
-    amount: existing.amount ?? signal.amount,
-    currency: existing.currency ?? signal.currency,
-    billing_cadence: existing.billing_cadence ?? signal.billing_cadence,
-    next_renewal_at: existing.next_renewal_at ?? signal.next_renewal_at,
-    cancel_by_at: existing.cancel_by_at ?? signal.cancel_by_at,
     last_observed_content_date: existing.last_observed_content_date ?? signal.event_date,
+  }
+}
+
+function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
+  return {
+    signal_type: signal.signal_type,
+    amount: signal.signal_type === 'trial_start' ? 0 : signal.amount,
+    currency: signal.currency,
+    billing_cadence: signal.billing_cadence,
+    period_start: signal.event_date,
+    next_renewal_at: signal.next_renewal_at,
+    cancel_by_at: signal.cancel_by_at,
   }
 }
 
@@ -190,13 +183,16 @@ export function match(
     }
   }
 
+  const cyclePayload = buildCyclePayload(signal)
+
   if (bestMatch && bestScore >= MATCH_THRESHOLD) {
     return {
       action: 'update',
       matched_id: bestMatch.id,
-      payload: buildUpdatePayload(signal, bestMatch, podId),
+      subscriptionPayload: buildUpdateSubscriptionPayload(signal, bestMatch, podId),
+      cyclePayload,
     }
   }
 
-  return { action: 'insert', payload: buildBasePayload(signal, podId) }
+  return { action: 'insert', subscriptionPayload: buildSubscriptionPayload(signal, podId), cyclePayload }
 }

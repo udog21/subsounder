@@ -46,12 +46,12 @@ function formatCurrency(amount: number): string {
 
 function toMonthly(amount: number, cadence: string): number {
   switch (cadence) {
-    case 'daily': return amount * 30
-    case 'weekly': return amount * 4.33
-    case 'monthly': return amount
+    case 'daily':     return amount * 30
+    case 'weekly':    return amount * 4.33
+    case 'monthly':   return amount
     case 'quarterly': return amount / 3
-    case 'annual': return amount / 12
-    default: return 0
+    case 'annual':    return amount / 12
+    default:          return 0
   }
 }
 
@@ -59,15 +59,6 @@ function annualEquivalent(subs: Subscription[]): number {
   return subs.reduce((sum, s) => {
     if (!s.amount || !s.billing_cadence || s.currency !== 'USD') return sum
     return sum + toMonthly(s.amount, s.billing_cadence) * 12
-  }, 0)
-}
-
-// Estimates savings from switching monthly-billed subs to annual.
-// Typical SaaS annual pricing: pay 10 months, get 12 (~17% off).
-function annualSavingsPotential(subs: Subscription[]): number {
-  return subs.reduce((sum, s) => {
-    if (!s.amount || s.billing_cadence !== 'monthly' || s.currency !== 'USD') return sum
-    return sum + s.amount * 2
   }, 0)
 }
 
@@ -138,9 +129,6 @@ function TrialCountdown({ cancel_by_at, trial_ends_at }: { cancel_by_at: string 
 function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean }) {
   const renewal = formatRenewalDate(sub.next_renewal_at)
   const cancelSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(sub.display_name + ' cancel subscription')}`
-  const annualHint = !dimmed && sub.billing_cadence === 'monthly' && sub.amount
-    ? `~${formatCurrency(sub.amount * 10)}/yr with annual plan`
-    : null
 
   return (
     <div className={`${styles.card} ${dimmed ? styles.cardDimmed : ''}`}>
@@ -172,7 +160,6 @@ function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean
           <div className={styles.amount}>
             {formatAmount(sub.amount, sub.currency, sub.billing_cadence)}
           </div>
-          {annualHint && <div className={styles.annualHint}>{annualHint}</div>}
           <StatusBadge status={sub.status} />
         </div>
       </div>
@@ -227,25 +214,46 @@ export default async function HomePage() {
     svc.from('pods').select('alias_email').eq('id', profile.pod_id).single(),
     svc
       .from('subscriptions')
-      .select('id, display_name, provider_domain, amount, currency, billing_cadence, next_renewal_at, trial_ends_at, cancel_by_at, status, cancellation_url, cancellation_difficulty, canceled_at')
-      .eq('pod_id', profile.pod_id)
-      .order('next_renewal_at', { ascending: true }),
+      .select(
+        'id, display_name, provider_domain, status, cancellation_url, cancellation_difficulty, canceled_at, cycle:subscription_cycles!subscriptions_current_cycle_id_fkey(amount, currency, billing_cadence, next_renewal_at, cancel_by_at, period_end)',
+      )
+      .eq('pod_id', profile.pod_id),
   ])
 
   const aliasEmail = podResult.data?.alias_email ?? null
-  const subscriptions: Subscription[] = (subsResult.data ?? []) as Subscription[]
 
-  const active = subscriptions.filter(s => s.status !== 'cancelled')
-  const cancelled = subscriptions.filter(s => s.status === 'cancelled')
+  // Flatten the cycle join into the subscription shape and sort by next renewal
+  const raw = subsResult.data ?? []
+  const subscriptions: Subscription[] = raw
+    .map((s) => {
+      const cycle = Array.isArray(s.cycle) ? s.cycle[0] : s.cycle
+      return {
+        id: s.id,
+        display_name: s.display_name,
+        provider_domain: s.provider_domain ?? null,
+        status: s.status,
+        cancellation_url: s.cancellation_url ?? null,
+        cancellation_difficulty: s.cancellation_difficulty ?? null,
+        canceled_at: s.canceled_at ?? null,
+        amount: cycle?.amount ?? null,
+        currency: cycle?.currency ?? null,
+        billing_cadence: cycle?.billing_cadence ?? null,
+        next_renewal_at: cycle?.next_renewal_at ?? null,
+        cancel_by_at: cycle?.cancel_by_at ?? null,
+        trial_ends_at: cycle?.period_end ?? null,
+      }
+    })
+    .sort((a, b) => {
+      if (!a.next_renewal_at) return 1
+      if (!b.next_renewal_at) return -1
+      return new Date(a.next_renewal_at).getTime() - new Date(b.next_renewal_at).getTime()
+    })
 
-  const monthlyBurn = active.reduce((sum, s) => {
-    if (!s.amount || !s.billing_cadence || s.currency !== 'USD') return sum
-    return sum + toMonthly(s.amount, s.billing_cadence)
-  }, 0)
+  const active = subscriptions.filter((s) => s.status !== 'cancelled')
+  const cancelled = subscriptions.filter((s) => s.status === 'cancelled')
 
   const annualBurn = annualEquivalent(active)
-  const savingsPotential = annualSavingsPotential(active)
-  const hasNonUsd = active.some(s => s.amount && s.currency && s.currency !== 'USD')
+  const hasNonUsd = active.some((s) => s.amount && s.currency && s.currency !== 'USD')
   const currencyLabel = hasNonUsd ? ' (USD)' : ''
 
   return (
@@ -255,20 +263,8 @@ export default async function HomePage() {
         <div className={styles.header}>
           <div className={styles.headerTop}>
             <h1 className={styles.title}>Your Subscriptions</h1>
-            {(monthlyBurn > 0 || annualBurn > 0) && (
-              <div className={styles.burns}>
-                {monthlyBurn > 0 && (
-                  <span className={styles.burnMonthly}>{formatCurrency(monthlyBurn)}/mo{currencyLabel}</span>
-                )}
-                {annualBurn > 0 && (
-                  <span className={styles.burnAnnual}>{formatCurrency(annualBurn)}/yr{currencyLabel}</span>
-                )}
-                {savingsPotential > 0 && (
-                  <span className={styles.burnSavings}>
-                    Switch to annual · save ~{formatCurrency(savingsPotential)}/yr (est.)
-                  </span>
-                )}
-              </div>
+            {annualBurn > 0 && (
+              <span className={styles.burnAnnual}>{formatCurrency(annualBurn)}/yr{currencyLabel}</span>
             )}
           </div>
 
@@ -299,7 +295,7 @@ export default async function HomePage() {
         {active.length > 0 && (
           <div className={styles.activeSection}>
             <div className={styles.list}>
-              {active.map(sub => (
+              {active.map((sub) => (
                 <SubscriptionCard key={sub.id} sub={sub} />
               ))}
             </div>
@@ -310,7 +306,7 @@ export default async function HomePage() {
           <div>
             <div className={styles.cancelledLabel}>Cancelled</div>
             <div className={styles.list}>
-              {cancelled.map(sub => (
+              {cancelled.map((sub) => (
                 <SubscriptionCard key={sub.id} sub={sub} dimmed />
               ))}
             </div>

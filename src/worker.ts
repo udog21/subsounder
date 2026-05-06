@@ -18,6 +18,14 @@ export default {
         })
       );
     }
+    if (event.cron === "*/15 * * * *") {
+      ctx.waitUntil(
+        fetch(`${base}/api/cron/product-enrichment`, {
+          method: "POST",
+          headers: { "x-cron-secret": env.CRON_SECRET },
+        })
+      );
+    }
     if (event.cron === "0 8 * * *") {
       ctx.waitUntil(
         fetch(`${base}/api/cron/admin-digest`, {
