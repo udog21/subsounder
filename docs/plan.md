@@ -406,9 +406,12 @@ Email content (text-forward, minimal styling):
 
 Replace [app/page.tsx](../app/page.tsx) placeholder.
 
-**Data fetching:** Server component. Fetch via Supabase client (service role on server, anon on client):
+**Data fetching:** Server component. Fetch explicit columns (not `SELECT *`) to keep the type contract explicit:
 ```sql
-SELECT s.*, pod.alias_email
+SELECT s.id, s.display_name, s.provider_domain, s.amount, s.currency,
+       s.billing_cadence, s.next_renewal_at, s.trial_ends_at, s.cancel_by_at,
+       s.status, s.cancellation_url, s.cancellation_difficulty, s.canceled_at,
+       pod.alias_email
 FROM subscriptions s
 JOIN pods pod ON pod.id = s.pod_id
 JOIN profiles p ON p.pod_id = pod.id
@@ -416,28 +419,106 @@ WHERE p.auth_user_id = auth.uid()
 ORDER BY s.next_renewal_at ASC NULLS LAST
 ```
 
-**Per subscription card:**
-- Display name + `merchant_domain` (favicon if available)
-- `amount` + `currency` + `billing_cadence` formatted ("$9.99/month")
-- Next renewal: relative ("in 23 days") + absolute date
-- Status badge: `active` | `cancelled` | `trial`
-- Cancellation difficulty: 1–5 dots (if `cancellation_difficulty` is set)
-- Cancellation link: `[Cancel →]` pointing to `cancellation_url` (if set); else `[How to cancel]` pointing to a static help page
+**Analytics helpers (pure functions, inline in page.tsx):**
 
-**Page header:**
-- Alias email with copy-to-clipboard button: "Forward subscription emails to:"
-- Monthly burn estimate: sum of all active subscriptions normalized to monthly cadence (annual ÷ 12)
+`toMonthly(amount, cadence)` — normalize any cadence to monthly equivalent (daily × 30, weekly × 4.33, monthly × 1, quarterly ÷ 3, annual ÷ 12, one_time → 0)
+
+`annualEquivalent(subs)` — sum of `toMonthly() × 12` for USD active subscriptions with known amount
+
+`annualSavingsPotential(subs)` — sum of `amount × 12 × (annual_discount_pct / 100)` for USD active subscriptions where `billing_cadence = 'monthly'` and `annual_discount_pct` is non-null. Only shows when at least one qualifying subscription has merchant-sourced discount data (Phase 7). Until Phase 7 seed data is live, this line is hidden.
+
+Multi-currency: only USD subscriptions count toward dollar totals. Non-USD subscriptions still appear in the list. If any non-USD active subscriptions exist, append "(USD)" to the header totals.
+
+**Page header — analytics block:**
+
+```
+Your Subscriptions                    $127/mo
+                                   $1,524/yr
+                     Switch to annual · save ~$254/yr (est.)
+```
+
+- Monthly figure: prominent (16px, `#cccccc`)
+- Annual figure: secondary (13px, `#666666`)
+- Savings line: only shown when `annualSavingsPotential > 0` (requires Phase 7 merchant data); muted green (`#4a7c5a`), 11px, prefixed "Switch to annual · save ~$X/yr (est.)"
+- Alias email row: "Forward subscription emails to: `alias@inbound.subsounder.com` [copy]"
+
+**Per subscription card:**
+- Display name + `provider_domain` (favicon via Google S2 if available; fallback: first letter in grey box)
+- `amount` + `currency` + `billing_cadence` formatted ("$9.99/month")
+- If `billing_cadence = 'monthly'` and `annual_discount_pct` is non-null (and not dimmed): muted secondary line "~$[amount × 12 × (pct / 100)]/yr savings with annual plan" — sourced from merchant data (Phase 7); hidden until populated
+- Status badge: `active` | `trial` | `cancelled`
+- Next renewal: relative ("in 23 days") + absolute date
+- **Trial countdown** (only when `status = 'trial'`):
+  - If `cancel_by_at` is set → "Cancel by [date] · N days left" (higher urgency — deadline to avoid charge)
+  - Else if `trial_ends_at` is set → "Trial ends [date] · N days left"
+  - `days = Math.ceil((deadline - Date.now()) / 86_400_000)`
+  - Color: ≤ 3 days → red (`#f87171`), ≤ 7 days → amber (`#fbbf24`), > 7 days → muted (`#666666`)
+  - Placement: in bottom row alongside renewal date, before difficulty dots
+- Cancellation difficulty: 1–5 dots, color-coded (green ≤ 2, amber = 3, red ≥ 4)
+- Cancellation link: `[Cancel →]` pointing to `cancellation_url` (if set); else `[How to cancel]` linking to Google search for "[display_name] cancel subscription"
 
 **Empty state:** "Forward any subscription receipt to `<alias>` to get started."
 
-**Cancelled subscriptions:** Shown below active ones, visually dimmed.
+**Cancelled subscriptions:** Shown below active ones at 45% opacity. No annual hint shown on dimmed cards.
 
-### Phase 7 — Cancellation Seed Data
+**Post-MVP analytics (defer):**
+- Projected spend for remaining current year (requires looping through renewal dates against year-end; noisy without billing history)
+- "SubSounder ROI" callout: "Tracking $X/yr — SubSounder costs $50/yr" (add once pricing is live in DB)
+- Category breakdown, month-over-month trends, savings-confirmed counter from cancellations
 
-Curate top 50 subscription providers and populate `merchants` table:
-- `name`, `website`, `aliases[]`
-- Extend with migration adding `cancellation_url`, `cancellation_difficulty` to `merchants` (or a separate `merchant_meta` table)
-- When parser writes a subscription, attempt domain match against merchants → set `cancellation_url` and `cancellation_difficulty` on the subscription
+### Phase 7 — Cancellation Seed Data & Merchant Enrichment
+
+**Migration** (`supabase/migrations/20260505_000001_merchant_enrichment.sql`):
+
+```sql
+ALTER TABLE merchants
+  ADD COLUMN IF NOT EXISTS cancellation_url      text,
+  ADD COLUMN IF NOT EXISTS cancellation_difficulty smallint,   -- 1 (easy) – 5 (hard)
+  ADD COLUMN IF NOT EXISTS annual_discount_pct   smallint;    -- e.g. 20 = 20% off annual
+
+ALTER TABLE subscriptions
+  ADD COLUMN IF NOT EXISTS annual_discount_pct   smallint;    -- denormalized from merchants at parse time
+```
+
+**Seed file** (`supabase/seed.sql`) — top ~50 merchants, safe to re-run:
+
+```sql
+INSERT INTO merchants (name, website, aliases, cancellation_url, cancellation_difficulty, annual_discount_pct)
+VALUES
+  ('Netflix',  'netflix.com',  '{}', 'https://www.netflix.com/cancelplan', 1, NULL),
+  ('Spotify',  'spotify.com',  '{}', 'https://www.spotify.com/account/subscription/cancel', 2, 17),
+  ('Adobe',    'adobe.com',    '{"Adobe Creative Cloud"}', 'https://account.adobe.com/plans', 4, 40),
+  -- ... top 50 total
+ON CONFLICT (lower(name)) DO UPDATE SET
+  cancellation_url       = EXCLUDED.cancellation_url,
+  cancellation_difficulty = EXCLUDED.cancellation_difficulty,
+  annual_discount_pct    = EXCLUDED.annual_discount_pct;
+```
+
+**Parser enrichment** (`app/api/parse/route.ts`) — after subscription insert/update, if a merchant domain match exists:
+
+```typescript
+// domain-match merchants table (exact lower() comparison on website column)
+const { data: merchant } = await svc
+  .from('merchants')
+  .select('cancellation_url, cancellation_difficulty, annual_discount_pct')
+  .ilike('website', `%${signal.merchant_domain}%`)
+  .limit(1)
+  .single()
+
+if (merchant) {
+  await svc.from('subscriptions').update({
+    cancellation_url:        merchant.cancellation_url,
+    cancellation_difficulty: merchant.cancellation_difficulty,
+    annual_discount_pct:     merchant.annual_discount_pct,
+  }).eq('id', subscriptionId)
+}
+```
+
+**UI update** (`app/page.tsx`) — remove the hardcoded `amount × 10` estimate; replace with merchant-sourced data:
+
+- `annualHint` on card: only shown when `sub.annual_discount_pct != null`; formula `amount × 12 × (pct / 100)`
+- `annualSavingsPotential` in header: same — sum only subscriptions where `annual_discount_pct` is non-null
 
 Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 
@@ -461,8 +542,10 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `app/api/cron/renewal-reminders/route.ts` | New | Daily reminder dispatch |
 | `lib/email/index.ts` | New | Mailgun client + email templates |
 | `app/page.tsx` | Rewrite | Subscription catalog UI |
+| `app/components/CopyButton.tsx` | New | Client component for alias email clipboard button |
 | `supabase/migrations/20260505_000000_reboot_schema.sql` | New | Full schema DDL + removals + soundings_log |
-| `supabase/seed.sql` | New | Top 50 merchants seed data |
+| `supabase/migrations/20260505_000001_merchant_enrichment.sql` | New | `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` on merchants + subscriptions |
+| `supabase/seed.sql` | New | Top ~50 merchants: cancellation URL, difficulty, annual discount % |
 
 ---
 
@@ -549,5 +632,6 @@ Claude tests the backend end-to-end locally and reports results. You verify the 
 | 4 | Trigger `/api/cron/parse-sweep` → pending receipts processed; check `parser_status` flips to `'parsed'` for each |
 | 4b | Set a subscription `next_renewal_at` to 3 days from now; trigger `/api/cron/renewal-reminders` → Mailgun email delivered to test inbox |
 | 5 | Parser writes new subscription → "new subscription detected" email delivered within 30 seconds |
-| 6 | Log in → dashboard shows subscription list with alias, amounts, renewal dates; empty state shows alias email; cancellation links visible for seeded merchants |
-| 7 | Forward a real Spotify renewal email to alias → end-to-end: receipt stored, parsed, subscription appears in dashboard, "new subscription" email received |
+| 6 | Log in → dashboard shows subscription list with alias, amounts, renewal dates; empty state shows alias email; cancellation links and annual savings hints visible for seeded merchants |
+| 7 | `supabase db reset` → merchants seeded; forward a Spotify renewal email → subscription row has `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` populated; dashboard shows savings hint |
+| 7b | Forward a real Spotify renewal email to alias → end-to-end: receipt stored, parsed, subscription appears in dashboard, "new subscription" email received |

@@ -28,7 +28,9 @@ app/
     cron/
       parse-sweep/     Retry pending receipts every 5min
       renewal-reminders/  Daily 9am reminder dispatch
-  page.tsx             Subscription catalog UI
+  components/
+    CopyButton.tsx     Client component: alias email clipboard button
+  page.tsx             Subscription catalog UI (server component)
 lib/
   parser/
     normalize.ts       HTML→text, forwarded block extraction, 12k truncation
@@ -36,21 +38,22 @@ lib/
     validate.ts        Output validation + parser_run_status suggestion
     match.ts           Score-based subscription matching + write decision
   parse-trigger.ts     Shared helper: call /api/parse (used by inbound + cron)
-  email/index.ts       Resend client + email templates
+  email/index.ts       Mailgun client + email templates (new/renewal notifications)
 src/
   worker.ts            CF Worker entry: wraps OpenNext fetch + scheduled cron handler
 supabase/
   migrations/          All schema DDL (run in order; db reset rebuilds from here)
-  seed.sql             Top ~50 merchant cancellation data
+  seed.sql             Top ~50 merchants: cancellation URL, difficulty, annual_discount_pct (Phase 7)
 ```
 
 ## Database Schema (key tables)
 - `pods` — subscription group, one per user; holds `alias_email`
 - `profiles` — user profile; `auth_user_id` links to `auth.users`
+- `merchants` — canonical merchant data: `name`, `website`, `aliases[]`, `cancellation_url`, `cancellation_difficulty` (1–5), `annual_discount_pct` (Phase 7 adds last three columns)
 - `inbound_receipts` — raw email signals; `parser_status` = `pending | parsed | ignored | error`
-- `parser_runs` — one row per parse attempt; links to `inbound_receipts`
-- `soundings_log` — one row per extracted signal; `parser_run_id` FK; `resolved_subscription_id` set after matching
-- `subscriptions` — normalized current state; has `cancellation_url`, `cancellation_difficulty`
+- `parser_runs` — control plane, one row per parse attempt; links to `inbound_receipts`
+- `soundings_log` — data plane, one row per extracted signal; `parser_run_id` FK; `resolved_subscription_id` set after matching
+- `subscriptions` — normalized current state per user; `cancellation_url`, `cancellation_difficulty`, `annual_discount_pct` denormalized from `merchants` at parse time
 - `subscription_cycles` — billing history
 
 ## Local Development
