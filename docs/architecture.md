@@ -67,3 +67,17 @@ UI and reminder logic should read `subscriptions.cancellation_url ?? products.ca
 Inbound receipt dedup uses `INSERT ... ON CONFLICT (pod_id, dedupe_key) DO NOTHING`. There is no pre-check SELECT. This is intentional — a pre-check creates a TOCTOU race under concurrent inbound delivery. The unique constraint is the guard.
 
 Same pattern applies to `parser_runs` idempotency: `UNIQUE (inbound_receipt_id, parser_name, input_hash) WHERE input_hash IS NOT NULL`.
+
+---
+
+## Parse and cron: in-process, never HTTP self-fetch
+
+Slow background work (LLM parse, cron jobs) runs as direct function calls — never as HTTP fetches back to the worker's own hostname. Cloudflare's edge protections (loop detection, Bot Fight Mode) treat self-fetches as suspicious and return 522/403 unpredictably.
+
+- Inbound webhook's `after()` calls `runParse()` directly (see [`lib/parser/run.ts`](../lib/parser/run.ts))
+- `src/worker.ts scheduled()` imports cron functions from [`lib/cron/`](../lib/cron/) and invokes them via `ctx.waitUntil()`
+- HTTP routes at `/api/parse` and `/api/cron/*` remain as thin auth-wrapped wrappers — preserved for manual `curl` debugging
+
+The Mailgun-timeout concern that drove the original deferred-work design is still solved — by `after()` / `ctx.waitUntil()`, not by the HTTP indirection.
+
+Full record: [`adr/0001-in-process-cron-and-parse.md`](adr/0001-in-process-cron-and-parse.md).
