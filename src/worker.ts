@@ -8,7 +8,16 @@ import { runRenewalReminders } from "../lib/cron/renewal-reminders";
 export default {
   fetch: nextWorker.fetch,
 
-  async scheduled(event: ScheduledEvent, _env: CloudflareEnv, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledEvent, env: CloudflareEnv, ctx: ExecutionContext) {
+    // OpenNext populates process.env on the fetch path; scheduled() runs outside that
+    // wrapper, so the cron functions (which use process.env.* via createServiceClient
+    // and the email lib) need it set up manually here.
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof value === "string") {
+        (process.env as Record<string, string>)[key] = value;
+      }
+    }
+
     if (event.cron === "*/5 * * * *") {
       ctx.waitUntil(runParseSweep().catch((err) => console.error("[cron] parse-sweep failed:", err)));
     }
