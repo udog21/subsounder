@@ -1,0 +1,15 @@
+name = "subsounder"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+[triggers]
+crons = ["*/5 * * * *", "*/15 * * * *", "0 8 * * *", "0 9 * * *"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1

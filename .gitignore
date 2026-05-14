@@ -25,10 +25,19 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+.dev.vars
 
 # vercel
 .vercel
 
+# cloudflare / opennext build artifacts
+.open-next/
+.wrangler/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code settings (contain API keys in permission allow-lists)
+.claude/
+.mcp.json
