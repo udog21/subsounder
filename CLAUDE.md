@@ -55,6 +55,12 @@ supabase/
 - `soundings_log` — data plane, one row per extracted signal; `parser_run_id` FK; `resolved_subscription_id` set after matching
 - `subscriptions` — identity + current state roll-up; no financial columns; `current_cycle_id` FK points to the most recent `subscription_cycles` row; `product_id`, `cancellation_url`, `cancellation_difficulty` denormalized from `products`
 - `subscription_cycles` — one row per billing event (including trials with `amount=0`); holds `amount`, `currency`, `billing_cadence`, `period_start`, `period_end`, `next_renewal_at`, `cancel_by_at`, `signal_type`, `source_sounding_id`
+- `prompt_templates` — versioned LLM system prompts; one row per `(agent_name, version)`; exactly one row per `agent_name` is `is_active = true` (enforced by `prompt_templates_one_active` partial unique index)
+
+## Prompt management
+- **Source of truth:** the active LLM prompt lives in the `prompt_templates` table, not in code. The `is_active = true` row for a given `agent_name` is authoritative. `seed.sql` is only the initial dev-DB bootstrap and lags reality once any prompt-versioning migration lands.
+- **To inspect the live prompt:** query via Supabase MCP (`SELECT system_prompt FROM prompt_templates WHERE agent_name = '<x>' AND is_active = true`). Do not read `seed.sql` and assume it matches production.
+- **To change a prompt:** never UPDATE `system_prompt` in place. Write a migration that flips the current row to `is_active = false` and INSERTs a new row with `version` bumped and `is_active = true`. This preserves the historical record so `parser_runs.prompt_version` references remain valid and longitudinal A/B comparisons stay queryable.
 
 ## Local Development
 ```bash
