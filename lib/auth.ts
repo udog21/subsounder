@@ -39,7 +39,7 @@ export async function getUser() {
  * Get the profile for the current authenticated user (server-side)
  */
 export async function getProfileForUser(userId: string): Promise<Profile | null> {
-  const supabaseClient = createClient()
+  const supabaseClient = await createClient()
   const { data, error } = await supabaseClient
     .from('profiles')
     .select('*')
@@ -61,7 +61,7 @@ export async function getProfileForUser(userId: string): Promise<Profile | null>
  * Get the current session (server-side)
  */
 export async function getServerSession() {
-  const supabaseClient = createClient()
+  const supabaseClient = await createClient()
   const {
     data: { session },
     error,
