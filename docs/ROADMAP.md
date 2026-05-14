@@ -51,8 +51,17 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 5. **Onboarding empty state.** Guide first-time users to forward 5-10 recent receipts. Show example/expected timing.
 6. **Test-account cleanup.** Delete orphan v1-era rows (`be19adc5` "Apple" with mismatched plan_name) so the demo looks clean.
 
+### Catalog editing (alpha-scoped portion of a larger surface)
+
+Each catalog card needs a kebab/menu icon exposing:
+- **Dismiss** (alpha) — flip status to `deleted_by_user`. For false positives, services the user doesn't want to track.
+- **Mark as cancelled** (alpha) — flip status to `cancelled`. For subscriptions the user has actually cancelled with the merchant.
+- **Edit** (alpha or beta — scope TBD; see [open-questions.md](open-questions.md)) — modify fields directly. At minimum: display_name, amount, billing_cadence, next_renewal_at. Possibly: plan_name, billed_by, cancellation_url. Decide which fields are user-editable vs. parser-only before building.
+
+The Edit action is the entry point for users maintaining their own catalog manually (services that don't email receipts, parser corrections, etc.). It is foundational for both alpha (small editing) and beta (richer editing). Scope it explicitly before implementing.
+
 ### Nice-to-have for alpha
-- Manual subscription entry UI (for services that don't email receipts — gym autopay, etc.)
+- Manual "Add subscription" entry (for services that don't email receipts — gym autopay, etc.) — partially overlaps with Edit.
 - Cancellation_confirm signal handling tested end-to-end with a real cancellation email
 - Better default sort order on the catalog
 
@@ -88,6 +97,22 @@ Likely scope:
 - Reddit + Google ads campaign
 - Possibly Gmail OAuth bulk-scan for instant catalog seed (huge UX win, high trust ask — may slip to V1.x)
 - Cancellation-difficulty UI as a first-class feature, not a side note
+
+---
+
+## Future ingestion channels (parked — assess against priorities each milestone)
+
+Today's only ingestion channel is **email forwarding to the alias**. Each of the channels below would broaden how a user populates their catalog. Listed in rough order of effort × payoff for our positioning ("subscriptions that email you a receipt"); none are currently scheduled.
+
+| Channel | Effort | Value | Likely milestone | Notes |
+|---|---|---|---|---|
+| Manual "Add subscription" form | Low | High for services that don't email | Alpha / Beta | Overlaps with the Edit flow above — likely the same UI surface |
+| CSV import | Low | Niche / power users | Beta+ | Optional |
+| Gmail OAuth → bulk-scan last 90 days | High (auth + trust) | Very high — instant catalog | V1 | Massive UX win at signup, big trust ask. May slip to V1.x |
+| Bank / card connection (Plaid) | Very high | Very high but a different product | Probably never | Competes with Rocket Money. Different market positioning. |
+| Forward-from-Gmail browser extension | Med | Reduces friction of "select email → forward → return to app" | Beta+ | Only if friction data from alpha shows this matters |
+
+This table is a *placeholder* so future planning has a known set of options to weigh against new ideas. Promote items into milestone sections when prioritized.
 
 ---
 

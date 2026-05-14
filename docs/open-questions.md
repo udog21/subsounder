@@ -110,5 +110,5 @@ _Pending product decisions that the codebase needs answered. Each question stays
 
 - **Add questions** when a real codebase question depends on a product call that hasn't been made.
 - **Don't add** questions you can answer alone or that are pure-implementation choices.
-- **Decide** by editing the entry: flip Status to "Decided · YYYY-MM-DD", fill in the Decision line, optionally link to the PR / roadmap entry that implements it.
-- **Decided entries stay** — they become a lightweight ADR trail. Don't delete; archive into a "Resolved" section at the bottom once this gets long.
+- **When deciding:** delete the entry from this doc. If the decision is non-trivial or has implications worth preserving, write a corresponding ADR in `docs/adr/` (next numbered file). Trivial decisions (e.g. naming choices) can just disappear once implemented.
+- This doc reflects *only what is currently undecided*. The ADR folder is the historical log of what was decided and why.
