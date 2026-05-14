@@ -619,7 +619,6 @@ Seed file: `supabase/seed.sql` (separate from migrations, safe to re-run).
 | `PARSE_SECRET` | Auth header for `/api/parse` |
 | `CRON_SECRET` | Auth header for cron routes |
 | `ADMIN_EMAIL` | Recipient for daily admin digest (needs_review parser runs) |
-| `WORKERS_URL` | Base URL for internal fetches in `src/worker.ts` |
 
 All go in `.dev.vars` locally and Cloudflare dashboard secrets for production.
 
