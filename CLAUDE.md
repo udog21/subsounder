@@ -101,5 +101,8 @@ ADMIN_EMAIL
 ## IDE
 VS Code with the Claude Code extension. MCP logs are in the Output panel → "Claude Code" or "Claude Code MCP" dropdown after reloading the window (`Ctrl+Shift+P` → "Developer: Reload Window").
 
-## Full Plan Reference
-`docs/plan.md` — implementation phases, schema changes, file map, verification checklist
+## Planning docs
+- `docs/ROADMAP.md` — current milestone narrative (MVP → Private Alpha → Public Beta → V1). Strategic priorities. Read first when asked "what should I work on next."
+- `docs/open-questions.md` — pending product decisions that the codebase depends on. Read when an implementation choice hinges on a product call that hasn't been made.
+- `docs/mvp-plan.md` — historical MVP implementation plan (Phases 0-7). Reference only; not actively maintained.
+- GitHub issues — tactical work units (bugs, features, follow-ups). Each milestone item in ROADMAP typically spawns 1+ issues, labeled to the corresponding GH milestone.

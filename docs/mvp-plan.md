@@ -1,5 +1,7 @@
 # SubSounder MVP Plan
 
+> **Status: Historical.** MVP delivered 2026-05-14. This document captured the implementation plan for Phases 0-7. For current priorities see [ROADMAP.md](ROADMAP.md). For pending product decisions see [open-questions.md](open-questions.md). Kept for reference; not actively maintained.
+
 _Framing: treat this as a clean reboot. Existing test data in Supabase is disposable. The n8n workflows are reference material, not code to preserve._
 
 ---
