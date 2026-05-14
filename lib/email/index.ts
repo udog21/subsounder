@@ -1,10 +1,6 @@
-import Mailgun from 'mailgun.js'
-
-const mg = new Mailgun(FormData)
-const client = mg.client({ username: 'api', key: process.env.MAILGUN_API_KEY! })
-
 const FROM = 'SubSounder <sys-bot@subsounder.com>'
 const SENDING_DOMAIN = 'subsounder.com'
+const MAILGUN_API_BASE = 'https://api.mailgun.net/v3'
 
 function formatAmount(amount: number | null, currency: string | null): string {
   if (amount == null) return ''
@@ -39,12 +35,29 @@ function cancelDifficulty(difficulty: number | null): string {
   return 'Difficult'
 }
 
-const dashboardBase = process.env.WORKERS_URL
-  ? `https://${process.env.WORKERS_URL}`
-  : 'http://localhost:3000'
+const dashboardBase = 'https://app.subsounder.com'
 
 async function send(to: string, subject: string, text: string): Promise<void> {
-  await client.messages.create(SENDING_DOMAIN, { from: FROM, to, subject, text })
+  const apiKey = process.env.MAILGUN_API_KEY
+  if (!apiKey) {
+    throw new Error('MAILGUN_API_KEY not configured')
+  }
+
+  const body = new URLSearchParams({ from: FROM, to, subject, text })
+
+  const res = await fetch(`${MAILGUN_API_BASE}/${SENDING_DOMAIN}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${btoa(`api:${apiKey}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    throw new Error(`Mailgun send failed (${res.status}): ${errBody}`)
+  }
 }
 
 export async function sendNewSubscriptionEmail(
