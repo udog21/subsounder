@@ -7,14 +7,13 @@ export async function GET(request: NextRequest) {
   const error = requestUrl.searchParams.get('error')
   const errorDescription = requestUrl.searchParams.get('error_description')
 
-  // Handle errors from Supabase (e.g., expired OTP)
   if (error) {
-    const errorMessage = errorDescription 
+    const errorMessage = errorDescription
       ? decodeURIComponent(errorDescription.replace(/\+/g, ' '))
-      : error === 'otp_expired' 
+      : error === 'otp_expired'
         ? 'This magic link has expired. Please request a new one.'
         : 'Authentication failed. Please try again.'
-    
+
     return NextResponse.redirect(
       new URL(`/login?error=${encodeURIComponent(errorMessage)}`, request.url)
     )
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
   if (code) {
     const supabase = await createClient()
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-    
+
     if (exchangeError) {
       const errorMessage = exchangeError.message || 'Failed to authenticate. Please try again.'
       return NextResponse.redirect(
@@ -32,6 +31,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Redirect to app or onboarding - the client will handle the routing
-  return NextResponse.redirect(new URL('/login', request.url))
+  return NextResponse.redirect(new URL('/', request.url))
 }
