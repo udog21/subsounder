@@ -34,7 +34,7 @@ Write order is always: `parser_runs` first → `soundings_log` per signal → `s
 
 ## Products table: product-line granularity, not corporate entity
 
-The `products` table (renamed from `merchants` in migration `20260505_000001`) stores one row per **product line**, not one row per company.
+The `products` table (renamed from `merchants` in migration `20260505000001_rename_merchants_to_products_add_cancellation`) stores one row per **product line**, not one row per company.
 
 | Row | parent |
 |---|---|
