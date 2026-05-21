@@ -23,7 +23,7 @@ _Pending product decisions that the codebase needs answered. Each question stays
 
 ### Q: Out-of-order receipts for the same subscription
 
-**Status:** Open · **Affects:** [lib/parser/match.ts](../lib/parser/match.ts), [lib/parser/run.ts](../lib/parser/run.ts)
+**Status:** Open · **Affects:** [lib/parser/match.ts](../../lib/parser/match.ts), [lib/parser/run.ts](../../lib/parser/run.ts)
 **Context:** A user can forward an old receipt *after* a newer one for the same service. Concrete: today they forward Spotify Apr 2026, tomorrow they forward Spotify Jan 2024. Currently `match.ts` returns `action='update'` for the older receipt and `run.ts` updates `subscriptions` unconditionally — so the older signal overwrites the newer state (next_renewal_at, last_observed_content_date, current_cycle_id, etc.).
 **What should happen:**
 - `subscription_cycles` row should still be inserted for the older receipt (historical record).
@@ -48,7 +48,7 @@ _Pending product decisions that the codebase needs answered. Each question stays
 
 ### Q: Trial → paid conversion
 
-**Status:** Open · **Affects:** [lib/parser/match.ts](../lib/parser/match.ts)
+**Status:** Open · **Affects:** [lib/parser/match.ts](../../lib/parser/match.ts)
 **Context:** A `trial_start` signal creates a sub with no amount. When the first paid `charge` or `receipt` signal arrives for the same merchant, should it update the existing trial-sub or create a new sub? Schema supports either.
 **Options:**
 - A: Match against the trial sub, update it to active with amount/cadence from the new signal.
@@ -58,7 +58,7 @@ _Pending product decisions that the codebase needs answered. Each question stays
 
 ### Q: Plan changes / upgrades
 
-**Status:** Open · **Affects:** [lib/parser/match.ts](../lib/parser/match.ts)
+**Status:** Open · **Affects:** [lib/parser/match.ts](../../lib/parser/match.ts)
 **Context:** If a user upgrades from Spotify Individual to Family, does that produce a `price_change` signal that updates the existing sub, or a new sub? Today the schema has both `price_change` as a signal_type and supports new-sub-creation. Match logic is untested for this case.
 **Options:**
 - A: Always update existing sub when merchant matches, regardless of signal type. Plan history lives in `subscription_cycles`.

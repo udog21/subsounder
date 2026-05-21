@@ -3,6 +3,77 @@
 ## What this is
 AI-powered subscription intelligence layer. Users forward subscription emails to a unique alias; the system parses them, builds a subscription catalog, and sends renewal reminders before surprise charges hit.
 
+## How to work here (non-negotiable)
+
+1. **No silent assumptions.** Do not invent or extend product requirements. If
+   instructions are ambiguous, incomplete, or conflict with docs/code, stop and
+   ask with a short list of concrete questions. Applies to UX copy, data model,
+   provider choice, security behavior, and unrequested "obvious" conveniences.
+2. **Planning docs are canonical.** Work from `docs/active/ROADMAP.md` and
+   `docs/active/open-questions.md`; GitHub issues are the tactical queue. If
+   behavior changes, update the matching doc in the same change.
+3. **Don't auto-advance.** One chunk of work per chat. Do not move to the next
+   step without an explicit prompt. Before a choice-sensitive step, surface
+   options, recommend one, and wait for a decision (or "use your recommendation").
+4. **Mark progress.** When a step completes, update the relevant planning doc /
+   GitHub issue immediately with status + brief notes.
+5. **Plain language.** Short sentences, numbered steps, concrete examples. Explain
+   jargon once. Include "why this matters" for non-obvious tasks. The human has an
+   engineering background but is not a full-time coder.
+6. **Scope discipline.** Keep changes scoped to the current step. No broad
+   refactors or architecture tangents bundled into unrelated work.
+
+### Working style
+
+How the human collaborates — internalize these so they aren't re-taught by
+correction.
+
+- **Discuss design in prose, not menus.** For open architecture/design questions,
+  give analysis, a concrete recommendation, and the genuine ambiguity — then ask
+  pointed questions and let the human redirect. The right answer is usually a
+  refinement of your proposal, not one of a fixed menu. Reserve multiple-choice
+  prompts for bounded forks (which label, where a fix lands, verify-now-or-not).
+- **State the plan before a big tool run.** One line — what you'll do and why —
+  before any exploration sweep or large batch of queries, then act. The human
+  paces the work and will interrupt; don't barrel silently into many tool calls.
+- **Verify before asserting.** Don't build root-cause narratives on inference.
+  Read the live source — active prompt rows in `prompt_templates`, current code,
+  Cloudflare Worker logs — and confirm a claim before stating it as fact.
+  Confident guesses that turn out wrong cost trust.
+- **Locked decisions stay locked.** Once a decision is recorded as settled (an
+  ADR, a `docs/archive/` provenance trail, a "do not reverse" note), treat it as
+  durable. Reopen it explicitly with new evidence; don't silently relitigate.
+
+### Step-completion checklist
+
+- [ ] Acceptance criteria for the step are met.
+- [ ] Code, docs (`docs/active/*`), and the relevant issue are consistent.
+- [ ] Tests/checks pass (or the gap is documented).
+- [ ] Open risks/follow-ups recorded.
+
+## Branch & PR workflow (non-negotiable)
+
+One chunk of work = one short-lived branch = one PR. This maps to one chat.
+
+The loop:
+
+1. Start of chat: `git switch main && git pull && git switch -c <type>/<scope>`.
+   Branch types: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`.
+2. Do the one chunk. Small, focused commits. Keep docs in sync.
+3. End of chat: push → `gh pr create` (clear title + body) → review →
+   squash-merge → delete the branch.
+4. Next chat restarts from a fresh, synced `main`.
+
+Rules:
+
+- One purpose per PR. Split unrelated changes into separate PRs.
+- But don't over-fragment. When sub-parts are tightly coupled and individually
+  non-shippable, bundle them into one PR with internally sequenced commits.
+  One purpose per PR, not one file.
+- `main` is always releasable. Never merge half-built work.
+- Branches live hours/days, not weeks.
+- Never skip hooks or push to `main` directly.
+
 ## Stack
 | Layer | Choice |
 |---|---|
@@ -71,6 +142,49 @@ npm run preview         # wrangler dev — CF Workers simulator, run before depl
 npm run deploy          # Build + deploy to Cloudflare
 ```
 
+### Database migrations
+
+- Migrations live in `supabase/migrations/` as `YYYYMMDDHHMMSS_name.sql`
+  (Supabase CLI standard), applied in lexicographic order. `supabase db reset`
+  rebuilds the local DB from the full set + `seed.sql`.
+- A migration is **immutable** once committed/applied. Never rename or edit an
+  applied migration — it desyncs the ledger and makes `db reset` diverge from
+  the remote. Schema changes are always new, additive migration files. (The
+  filename normalization done in the `docs/adopt-process-scaffolding` PR was a
+  one-time, deliberate alignment to the recorded ledger versions; the rule
+  applies cleanly going forward.)
+- The repo is the schema source of truth — commit a migration even if it was
+  applied by hand first.
+- `db reset` must always rebuild cleanly from migrations + seed. If it doesn't,
+  fix the migration set rather than papering over it.
+- Never hand-run migration SQL in the Supabase SQL editor — it desyncs the
+  ledger. (Prompt-version bumps follow the [Prompt management](#prompt-management)
+  rule: always a new migration row, never an in-place UPDATE.)
+
+#### Supabase CLI workflow
+
+Authoring and shipping a new migration:
+
+```bash
+npx supabase migration new <name>    # creates supabase/migrations/<timestamp>_<name>.sql
+# edit the file
+npx supabase db reset                # rebuild local from migrations + seed; verifies the migration is clean
+npx supabase db push                 # apply to remote; records in supabase_migrations.schema_migrations
+git add supabase/migrations/<file> && git commit
+```
+
+`supabase db push` reads the local `supabase/migrations/` folder, compares
+versions against the remote `supabase_migrations.schema_migrations` ledger, and
+applies anything missing in order. If a local file's version isn't in the remote
+ledger but the change has already been applied (e.g. you used MCP `apply_migration`
+or ran SQL by hand — don't), the push will explode trying to re-apply. Fix by
+ensuring filename versions match what the ledger recorded, not the other way
+around.
+
+For one-off DDL during exploration, the Supabase MCP `apply_migration` tool also
+records to the ledger — but always commit the matching file to `supabase/migrations/`
+in the same PR so the repo stays the source of truth.
+
 ## Testing Division of Labor
 - **Backend (I test):** curl/HTTP calls to local API routes, DB row verification
 - **UI (you verify):** browser at `localhost:3000`
@@ -102,7 +216,45 @@ ADMIN_EMAIL
 VS Code with the Claude Code extension. MCP logs are in the Output panel → "Claude Code" or "Claude Code MCP" dropdown after reloading the window (`Ctrl+Shift+P` → "Developer: Reload Window").
 
 ## Planning docs
-- `docs/ROADMAP.md` — current milestone narrative (MVP → Private Alpha → Public Beta → V1). Strategic priorities. Read first when asked "what should I work on next."
-- `docs/open-questions.md` — pending product decisions that the codebase depends on. Read when an implementation choice hinges on a product call that hasn't been made.
-- `docs/mvp-plan.md` — historical MVP implementation plan (Phases 0-7). Reference only; not actively maintained.
-- GitHub issues — tactical work units (bugs, features, follow-ups). Each milestone item in ROADMAP typically spawns 1+ issues, labeled to the corresponding GH milestone.
+
+See [docs/README.md](docs/README.md) for the full index. Quick map:
+
+- `docs/active/ROADMAP.md` — current milestone narrative (MVP → Private Alpha → Public Beta → V1). Strategic priorities. Read first when asked "what should I work on next."
+- `docs/active/open-questions.md` — pending product decisions the codebase depends on. Read when an implementation choice hinges on a product call that hasn't been made.
+- `docs/active/glossary.md` — the SubSounder vocabulary (pod, sounding, signal, cycle, etc.). Read first if a term in code or chat is unfamiliar.
+- `docs/archive/mvp-plan.md` — historical MVP implementation plan (Phases 0-7). Frozen; do not edit.
+- GitHub issues — tactical work units (bugs, features, follow-ups). Each milestone item in `active/ROADMAP.md` typically spawns 1+ issues, labeled to the corresponding GH milestone.
+
+## Tracks and milestones
+
+Two-dimensional planning model: every GitHub issue gets exactly **one track label** (ongoing thematic backlog) and is either scheduled into a **milestone** (delivery slice with a due date) or left unscheduled.
+
+- **Tracks** are persistent swim lanes. They don't have dates; they're how work is themed and how an agent decides "what kind of work is this." Each issue picks one.
+- **Milestones** are delivery slices (MVP, Private Alpha, Public Beta, V1). An issue ships when its milestone closes. Most issues belong to a milestone; some sit unscheduled.
+
+Tracks and milestones are orthogonal. A `feature` issue might be in Private Alpha; a `reliability` issue might be in Private Alpha too; both might also sit unscheduled until prioritized. Tracks survive milestones (we'll still be doing `llm` work in V1); milestones change.
+
+### Tracks (current)
+
+These are the active swim lanes. Apply exactly one to each issue. New tracks should be rare — propose in a planning chat, don't fork off silently.
+
+**`feature`** — user-facing capability
+: catalog editing affordances (Dismiss · Mark as cancelled · Edit) · manual "Add subscription" entry · onboarding empty state · renewal-reminder email content + cadence · new-subscription notification email · cancellation URL + difficulty surfacing on cards · trial countdown urgency · annual-spend rollup · default catalog sort · future ingestion channels (Gmail OAuth bulk-scan · CSV import · browser-extension forwarder) · multi-currency · family/pod sharing.
+
+**`trust`** — trust boundary, privacy, auth, RLS
+: RLS policy audit (every table scoped to `pod_id`) · service-role key handling (server-only, never client-bundled) · `auth_user_id` linkage discipline on `profiles` · alias-email enumeration resistance · `PARSE_SECRET` / `CRON_SECRET` rotation policy · `inbound_receipts.raw_email_html` retention posture · future Gmail OAuth privacy policy + CASA Tier 2 prep.
+
+**`llm`** — LLM extraction quality, prompt scope, eval
+: prompt iteration in `prompt_templates` (trial `cancel_by_at` · trial cadence default · cadence-vs-date-math reconciliation · monthly `next_renewal_at` inference) · `prompt_templates` versioning discipline (see [Prompt management](#prompt-management)) · classification-edge tightening (`maybe_subscription` vs `not_subscription`) · matcher accuracy under aliased merchant names (`products.aliases[]`) · per-signal `evidence` quality · LLM eval harness with sanitized real-receipt fixtures.
+
+**`reliability`** — resilience, self-healing, atomicity, edge cases (continuous; protects core correctness)
+: out-of-order receipt handling (`event_date`-wins in `lib/parser/run.ts`) · dedupe across renewal-notice + charge-receipt for one cycle · trial → paid conversion matching · plan-change / `price_change` handling · in-process invocation discipline (per [ADR-0001](docs/adr/0001-in-process-cron-and-parse.md)) · cron health + pending-receipt backlog drainage · `subscriptions.current_cycle_id` integrity (no orphans, no stale pointer) · Mailgun webhook signature + idempotency · stale-vs-cancelled status logic · product-enrichment cron scrape reliability.
+
+**`techdebt`** — infra and maintainability (continuous; never milestone-gating)
+: CLAUDE.md drift cleanup (e.g. stale entries in "Project Structure") · `lib/parse-trigger.ts` post-ADR-0001 re-evaluation · doc↔code drift listed in [docs/README.md](docs/README.md) "Known gaps" · CI setup · type-check enforcement · `supabase/queries/` proliferation cleanup · dev-loop ergonomics (`npm run dev` vs `npm run preview` parity).
+
+### Where things land when they don't fit neatly
+
+- **Cancellation-intel work** (the data moat) splits across tracks: user-visible surfacing is `feature`; the enrichment cron + scraping pipeline is `reliability`; user-confirmation flywheels are `feature`.
+- **Matcher correctness** (out-of-order, dedupe, trial→paid) is `reliability` — these are bugs in what we did with the model's output, not in the extraction quality (`llm` = "what the model saw and produced").
+- **Pure refactors and chores** are `techdebt` unless they're targeted at a specific functional area, in which case the functional track wins.

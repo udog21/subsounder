@@ -1,6 +1,6 @@
 # SubSounder MVP Plan
 
-> **Status: Historical.** MVP delivered 2026-05-14. This document captured the implementation plan for Phases 0-7. For current priorities see [ROADMAP.md](ROADMAP.md). For pending product decisions see [open-questions.md](open-questions.md). Kept for reference; not actively maintained.
+> **Status: Historical. (DO NOT EDIT.)** MVP delivered 2026-05-14. This document captured the implementation plan for Phases 0-7. For current priorities see [../active/ROADMAP.md](../active/ROADMAP.md). For pending product decisions see [../active/open-questions.md](../active/open-questions.md). Kept for reference; not actively maintained. Treat as a frozen snapshot — corrections belong in the live docs or a new ADR, not here.
 
 _Framing: treat this as a clean reboot. Existing test data in Supabase is disposable. The n8n workflows are reference material, not code to preserve._
 
@@ -324,7 +324,7 @@ Migration file: `supabase/migrations/20260505_000000_reboot_schema.sql`
 - Add RLS policy for `soundings_log` (mirror pods-scoped pattern from other tables)
 
 ### Phase 2 — Fix Inbound Webhook
-**File:** [app/api/mailgun/inbound/route.ts](../app/api/mailgun/inbound/route.ts)
+**File:** [app/api/mailgun/inbound/route.ts](../../app/api/mailgun/inbound/route.ts)
 
 Fix 5 bugs against the live schema:
 
@@ -465,7 +465,7 @@ Email content (text-forward, minimal styling):
 
 ### Phase 6 — Subscription Catalog UI
 
-Replace [app/page.tsx](../app/page.tsx) placeholder.
+Replace [app/page.tsx](../../app/page.tsx) placeholder.
 
 **Styling:** CSS Module (`app/page.module.css`). Structural + static styles go in the module (Figma CSS exports paste directly). Computed colors (difficulty dots, trial countdown urgency) stay inline since they are runtime values, not design tokens.
 

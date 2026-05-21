@@ -1,7 +1,7 @@
 -- Baseline schema: reproduces the pre-reboot state of the public schema so that
 -- supabase db reset can rebuild the full database from migrations.
--- Source: introspect captured 2026-05-05 before 20260505_000000_reboot_schema.sql was applied.
--- Run order: this → 20240101000000_create_pod_and_profile_rpc.sql → 20260505_000000_reboot_schema.sql
+-- Source: introspect captured 2026-05-05 before 20260505000000_reboot_schema.sql was applied.
+-- Run order: this → 20251218000001_create_pod_and_profile_rpc.sql → 20260505000000_reboot_schema.sql
 
 -- ─────────────────────────────────────────────────────────────────
 -- Helper functions
