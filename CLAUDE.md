@@ -43,6 +43,12 @@ correction.
 - **Locked decisions stay locked.** Once a decision is recorded as settled (an
   ADR, a `docs/archive/` provenance trail, a "do not reverse" note), treat it as
   durable. Reopen it explicitly with new evidence; don't silently relitigate.
+- **Surface what changed inline; don't make the human open files to verify edits.**
+  For small doc or code edits, paste the new or changed text directly in the chat
+  response. For larger rewrites, paste the key changed sections in chat; reserve
+  plain file links for content too long to inline. Repo docs are a consult-later
+  resource for the human — the primary content channel during a session is the
+  chat itself.
 
 ### Step-completion checklist
 
