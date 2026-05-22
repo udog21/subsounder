@@ -1,6 +1,6 @@
 # Open Product Questions
 
-_Pending product decisions that the codebase needs answered. Each question stays here until decided; resolved entries flip to "Decided" and link to the roadmap or PR that implemented the answer. New questions get appended at the bottom of the relevant section._
+_Pending product decisions that the codebase needs answered. Each question stays here until decided, then is deleted from this doc — see "How to use this doc" at the bottom. Non-trivial decisions are preserved as ADRs in `docs/adr/`; trivial ones disappear once implemented. Past commits hold earlier snapshots if you need to see what was previously open. New questions get appended at the bottom of the relevant section._
 
 ---
 
