@@ -5,6 +5,8 @@
 - **Deciders:** Lek
 - **Related:** [docs/competitive-analysis.md](../competitive-analysis.md), [docs/active/ROADMAP.md](../active/ROADMAP.md)
 
+> **Naming (added 2026-05-21):** The public resource originally called "Subsounder Society" in this ADR is now **Subscription Registry** at `subscriptionregistry.org`. The two operate as independent brands — a neutrally-branded public reference (which signals trust better than a Subsounder sub-brand would) plus the paid app — that can each survive on their own brand and may be linked by cross-promo later. All architectural decisions in this ADR remain in force; later docs use the new name. The filename and in-body references stay as-is for historical accuracy.
+
 ## Context
 
 SubSounder's `products` table holds merchant-side intel: `cancellation_url`, `cancellation_difficulty`, `cancellation_steps`, `pricing`, `aliases`, `parent_product_id`, `enrichment_status`. Per [competitive-analysis.md](../competitive-analysis.md), this dataset is the product's defensible moat, grown along three planned layers:

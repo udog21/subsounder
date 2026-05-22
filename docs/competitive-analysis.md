@@ -112,7 +112,7 @@ When the parser encounters a merchant not in the DB:
 5. Optionally: queue for human review before surfacing to users
 
 **Layer 3 — User signals (long-term)**
-Users who successfully cancel can confirm or correct the cancel URL and difficulty — crowdsourced accuracy improvement. Layer 3 is realized publicly as **Subsounder Society** — a free browsable cancellation-intel site that also serves as top-of-funnel SEO. See [ADR-0002](adr/0002-subsounder-society-boundary.md) for the data, editorial, publishing, and sequencing boundary.
+Users who successfully cancel can confirm or correct the cancel URL and difficulty — crowdsourced accuracy improvement. Layer 3 is realized publicly as **Subscription Registry** (`subscriptionregistry.org`) — a free browsable cancellation-intel site, neutrally branded, that also serves as top-of-funnel SEO for Subsounder. See [ADR-0002](adr/0002-subsounder-society-boundary.md) for the data, editorial, publishing, and sequencing boundary.
 
 ### What to build for MVP
 - Seed DB with top ~100–200 providers (covers ~80% of real emails based on Pareto)
@@ -122,7 +122,7 @@ Users who successfully cancel can confirm or correct the cancel URL and difficul
 
 ### What to defer
 - AI scrape pipeline (Layer 2) — build after seed DB is live and match rate is measured
-- User correction signals (Layer 3) — exposed publicly as Subsounder Society; export pipeline ships in Public Beta, public site launches at V1. See [ADR-0002](adr/0002-subsounder-society-boundary.md).
+- User correction signals (Layer 3) — exposed publicly as Subscription Registry (`subscriptionregistry.org`); export pipeline ships in Public Beta, public site launches at V1. See [ADR-0002](adr/0002-subsounder-society-boundary.md).
 
 ---
 
