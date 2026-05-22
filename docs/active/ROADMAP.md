@@ -84,7 +84,7 @@ Key bets (will firm up after alpha feedback):
 - UI polish round driven by alpha feedback
 - Onboarding flow tightened
 - Resolve at least the product-scope and data-model questions from [open-questions.md](open-questions.md)
-- **Subsounder Society plumbing:** create the `subsounder-society` repo and ship the snapshot-export job that seeds it from `products`. The public site launches at V1; Beta-window plumbing exists so V1 launches with real content. Society's data lives in its own repo so either project can survive the other — see [ADR-0002](../adr/0002-subsounder-society-boundary.md).
+- **Subscription Registry plumbing:** create the `subscription-registry` repo and ship the snapshot-export job that seeds it from `products`. The public site at `subscriptionregistry.org` launches at V1; Beta plumbing exists so V1 launches with real content. Independently branded, each project can survive the other — see [ADR-0002](../adr/0002-subsounder-society-boundary.md) (Naming note at top for the rebrand context).
 
 ---
 
@@ -94,7 +94,7 @@ Key bets (will firm up after alpha feedback):
 
 Likely scope:
 - Marketing landing page (separate from app)
-- **Subsounder Society public launch** — free browsable cancellation-intel resource on its own domain and infrastructure, acts as top-of-funnel SEO. Seeded from `products` via nightly snapshot; community PRs and anonymous experience signals evolve it independently. See [ADR-0002](../adr/0002-subsounder-society-boundary.md).
+- **Subscription Registry public launch** (`subscriptionregistry.org`) — free browsable cancellation-intel resource, neutrally branded as a public reference, acts as top-of-funnel for Subsounder. Seeded from `products` via nightly snapshot; community PRs and anonymous experience signals evolve it independently. See [ADR-0002](../adr/0002-subsounder-society-boundary.md).
 - Pricing decision: free / freemium / paid tier
 - Reddit + Google ads campaign
 - Possibly Gmail OAuth bulk-scan for instant catalog seed (huge UX win, high trust ask — may slip to V1.x)
