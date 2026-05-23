@@ -45,9 +45,9 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ---
 
-## Phase 1 — Harden for personal use · *current*
+## Phase 0 — Harden for personal use · *current*
 
-**Goal:** Make the data layer (parser + matcher + dedupe) accurate enough on Lek's real receipts that he's willing to live in the catalog daily. UI affordances for managing imperfect data (Dismiss, etc.) ship in Phase 2.
+**Goal:** Make the data layer (parser + matcher + dedupe) accurate enough on Lek's real receipts that he's willing to live in the catalog daily. UI affordances for managing imperfect data (Dismiss, etc.) ship in Phase 1.
 
 **Scope:**
 - [#3](https://github.com/udog21/subsounder/issues/3) Prompt v3 — trial fields, cadence-vs-date consistency, date grounding (`llm`)
@@ -55,13 +55,13 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup — clear v1-era orphan rows so dogfood starts on a known-clean slate (`techdebt`)
 - [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder that also feeds the LLM eval (sampling non-subscription "randoms" stress-tests the `maybe_subscription` vs `not_subscription` edge); ~1 hour, supportive not gating (`llm`)
 
-**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 2.
+**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 1.
 
 ### ◆ M0 — Dogfood officially begins · target Mon 2026-05-25
 
 ---
 
-## Phase 2 — Dogfood
+## Phase 1 — Dogfood
 
 **Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need.
 
@@ -76,7 +76,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ---
 
-## Phase 3 — Private Alpha
+## Phase 2 — Private Alpha
 
 **Goal:** Prove the funnel works on strangers' real inboxes before spending a cent on ads — and build M2's prerequisites in parallel.
 
