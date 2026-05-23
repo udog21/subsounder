@@ -47,15 +47,14 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ## Phase 1 — Harden for personal use · *current*
 
-**Goal:** Get the parser and catalog trustworthy enough that Lek will keep his own real subscription data in them.
+**Goal:** Make the data layer (parser + matcher + dedupe) accurate enough on Lek's real receipts that he's willing to live in the catalog daily. UI affordances for managing imperfect data (Dismiss, etc.) ship in Phase 2.
 
 **Scope:**
 - [#3](https://github.com/udog21/subsounder/issues/3) Prompt v3 — trial fields, cadence-vs-date consistency, date grounding (`llm`)
-- [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
 - [#7](https://github.com/udog21/subsounder/issues/7) Out-of-order receipts — an older signal must not overwrite newer subscription state (`reliability`)
-- [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup (`techdebt`) — likely resolved by #4 (dismiss the orphans in-UI)
+- [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup — clear v1-era orphan rows so dogfood starts on a known-clean slate (`techdebt`)
 
-**Gate (→ M0):** Lek's catalog holds ≥12 active personal subscriptions, every one correct or one-click dismissable; forwarded receipts parse cleanly on first pass — any miss is subtle (not glaring) and filed as a GH issue.
+**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 2.
 
 ### ◆ M0 — Dogfood officially begins · target Mon 2026-05-25
 
@@ -63,13 +62,14 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ## Phase 2 — Dogfood
 
-**Goal:** Lek lives in the product as a real daily user; build the pieces a *second* person will need.
+**Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need.
 
 **Scope:**
-- [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
+- [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
 - [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
+- [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
 
-**Gate (→ M1):** Sustained — across the dogfood period (~Mon–Fri), zero *glaring* parser misfires in real ongoing use (subtle ones filed); the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
+**Gate (→ M1):** Sustained — across the dogfood period (~Mon–Fri), zero *glaring* parser misfires in real ongoing use (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
 
 ### ◆ M1 — Alpha invites go out · target Fri–Sat 2026-05-29/30
 
