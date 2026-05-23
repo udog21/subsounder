@@ -57,8 +57,11 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       return { status: 'skipped', reason: 'already_processed' }
     }
 
-    const fromDomain = (receipt.from_domain ?? '').toLowerCase()
-    if (fromDomain === 'subsounder.com' || fromDomain.endsWith('.subsounder.com')) {
+    // Gmail's auto-forwarder rewrites From: to e.g. `inbound.subsounder.com@gmail.com`
+    // — the original recipient lives in the localpart, not the domain. Substring-match
+    // on from_email catches that loopback (see #29).
+    const fromEmail = (receipt.from_email ?? '').toLowerCase()
+    if (fromEmail.includes('subsounder.com')) {
       await supabase
         .from('inbound_receipts')
         .update({
