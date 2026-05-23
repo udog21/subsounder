@@ -49,6 +49,14 @@ correction.
   plain file links for content too long to inline. Repo docs are a consult-later
   resource for the human — the primary content channel during a session is the
   chat itself.
+- **Plan in time-boxed, ROI-legible chunks.** SubSounder is one of several
+  solo-founder projects; the founder's hours are the scarce resource, not
+  money. Give every milestone and step a rough time cost and a one-line "what
+  finishing this unlocks," so cross-project allocation is an informed call.
+  Keep the near-term (next 1–2 milestones) granular to session/day size; keep
+  later stages lighter. Flag slow-bleed risk (chronic under-resourcing) so a
+  clean pause can be chosen over a slow one. Working norms that transfer
+  across projects belong here in CLAUDE.md, not in agent memory.
 
 ### Step-completion checklist
 
@@ -225,7 +233,7 @@ VS Code with the Claude Code extension. MCP logs are in the Output panel → "Cl
 
 See [docs/README.md](docs/README.md) for the full index. Quick map:
 
-- `docs/active/ROADMAP.md` — current milestone narrative (MVP → Private Alpha → Public Beta → V1). Strategic priorities. Read first when asked "what should I work on next."
+- `docs/active/ROADMAP.md` — current stage-gate roadmap (MVP → M0 → M1 → M2 phases with Goal/Scope/Gate). Strategic priorities. Read first when asked "what should I work on next."
 - `docs/active/open-questions.md` — pending product decisions the codebase depends on. Read when an implementation choice hinges on a product call that hasn't been made.
 - `docs/active/glossary.md` — the SubSounder vocabulary (pod, sounding, signal, cycle, etc.). Read first if a term in code or chat is unfamiliar.
 - `docs/archive/mvp-plan.md` — historical MVP implementation plan (Phases 0-7). Frozen; do not edit.
@@ -236,9 +244,20 @@ See [docs/README.md](docs/README.md) for the full index. Quick map:
 Two-dimensional planning model: every GitHub issue gets exactly **one track label** (ongoing thematic backlog) and is either scheduled into a **milestone** (delivery slice with a due date) or left unscheduled.
 
 - **Tracks** are persistent swim lanes. They don't have dates; they're how work is themed and how an agent decides "what kind of work is this." Each issue picks one.
-- **Milestones** are delivery slices (MVP, Private Alpha, Public Beta, V1). An issue ships when its milestone closes. Most issues belong to a milestone; some sit unscheduled.
+- **Milestones** are *dated events* — transitions, not buckets of work. The work lives in **phases** between milestones (see [§ Milestones, phases, and gates](#milestones-phases-and-gates)). Today's milestones: MVP (done), M0 (dogfood begins), M1 (alpha invites), M2 (Public Beta launch). An issue is assigned to the GH milestone for the phase ending at that event; some sit unscheduled.
 
-Tracks and milestones are orthogonal. A `feature` issue might be in Private Alpha; a `reliability` issue might be in Private Alpha too; both might also sit unscheduled until prioritized. Tracks survive milestones (we'll still be doing `llm` work in V1); milestones change.
+Tracks and milestones are orthogonal. A `feature` issue might be assigned to M1; a `reliability` issue might be assigned to M1 too; both might also sit unscheduled until prioritized. Tracks survive milestones (we'll still be doing `llm` work after M2); milestones change.
+
+### Milestones, phases, and gates
+
+SubSounder plans with a **stage-gate** model — see [docs/active/ROADMAP.md](docs/active/ROADMAP.md) for the live plan.
+
+- A **milestone** is a *dated event* — a transition, zero duration. Name it as an event ("Dogfood begins", "Alpha invites go out"), not a phase-noun.
+- A **phase** is the *period of work between* two milestones. Work lives here.
+- Each phase carries three fields: **Goal** (one line — why), **Scope** (the work, each item a GH issue — *output* we control), and **Gate** (the checkable condition to reach the next milestone — *outcome* we verify).
+- Discipline: scope complete is necessary but not sufficient — the **Gate** is the real bar. Prefer outcome-phrased gates; early phases lean on output checks only because no population exists to measure yet.
+
+A GH milestone groups the Scope issues of the phase that ends at that milestone-event; its due date is the event's target date.
 
 ### Tracks (current)
 
