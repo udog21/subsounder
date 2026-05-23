@@ -58,6 +58,16 @@ correction.
   clean pause can be chosen over a slow one. Working norms that transfer
   across projects belong here in CLAUDE.md, not in agent memory.
 
+### Asks of the solo founder/dev
+
+The flipside of [Working style](#working-style) — what the agent relies on the
+human to surface, so it doesn't operate on stale state.
+
+- **Branch context.** Mention the current branch at the start of every new
+  chat, and whenever it changes between turns (e.g. after a PR merge or local
+  switch). The `git status` rule covers the agent on its side, but a one-line
+  human heads-up shortcuts an avoidable verify step.
+
 ### Step-completion checklist
 
 - [ ] Acceptance criteria for the step are met.

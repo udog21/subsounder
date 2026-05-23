@@ -120,7 +120,8 @@ The Subscription Registry (`subscriptionregistry.org`) is, for *roadmap* purpose
 
 ## Where this doc lives in the workflow
 
-- **Update this doc** when a phase's Goal/Scope/Gate changes, when a milestone is reached, or when a major scope decision lands.
+- **Update this doc** for **scope changes** (an item added, removed, or moved between phases) immediately, and for **milestone events** (a milestone reached, a new phase becoming current) once the Gate is verified.
+- **Do not** track per-issue landed state here — GH milestones are the live source of truth for tactical delivery (open/closed counts, progress bar). This doc stays forward-looking; the `What landed` block in each completed phase is a one-shot snapshot written *after* the phase concluded, not a running log.
 - **Don't** put bug fixes, individual refactors, or one-off chores here — those are GH issues inside a phase's Scope.
 - Each phase's Scope maps to GH issues; group them under the matching GH milestone (M0/M1/M2).
 - When asking an agent "what should I work on next," the answer is: the highest-priority open issue in the *current* phase's Scope.
