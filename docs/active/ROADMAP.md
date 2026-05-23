@@ -53,7 +53,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#3](https://github.com/udog21/subsounder/issues/3) Prompt v3 — trial fields, cadence-vs-date consistency, date grounding (`llm`)
 - [#7](https://github.com/udog21/subsounder/issues/7) Out-of-order receipts — an older signal must not overwrite newer subscription state (`reliability`)
 - [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup — clear v1-era orphan rows so dogfood starts on a known-clean slate (`techdebt`)
-- [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder (~1 hour, supportive not gating) (`techdebt`)
+- [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder that also feeds the LLM eval (sampling non-subscription "randoms" stress-tests the `maybe_subscription` vs `not_subscription` edge); ~1 hour, supportive not gating (`llm`)
 
 **Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 2.
 
