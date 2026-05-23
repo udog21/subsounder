@@ -80,7 +80,9 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
 
     let extraction
     try {
-      extraction = await extract(normalized_text, promptRow?.system_prompt, promptRow?.model_hint ?? undefined)
+      const today = new Date().toISOString().slice(0, 10)
+      const renderedPrompt = promptRow?.system_prompt?.replace(/\{\{TODAY\}\}/g, today)
+      extraction = await extract(normalized_text, renderedPrompt, promptRow?.model_hint ?? undefined)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'extraction_failed'
       await supabase.from('parser_runs').insert({
