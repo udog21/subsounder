@@ -85,9 +85,9 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 **Scope — M2 prerequisites (built in parallel):**
 - [#16](https://github.com/udog21/subsounder/issues/16) Public self-serve signup — remove invite gating (`feature`)
-- [#17](https://github.com/udog21/subsounder/issues/17) Analytics + conversion-funnel instrumentation — no ad tracking = no ads (`techdebt`)
+- [#17](https://github.com/udog21/subsounder/issues/17) Analytics + conversion-funnel instrumentation — no ad tracking = no ads (`marketing`)
 - [#18](https://github.com/udog21/subsounder/issues/18) Cancellation-intel research — top 50–100 providers, ranked by "how to cancel X" search volume (`feature`)
-- [#19](https://github.com/udog21/subsounder/issues/19) Registry site — scaffold `subscription-registry` repo + publish provider pages (`feature`)
+- [#19](https://github.com/udog21/subsounder/issues/19) Registry site — scaffold `subscription-registry` repo + publish provider pages (`marketing`)
 - [#20](https://github.com/udog21/subsounder/issues/20) Spend total as a first-class headline number — the conversion hook (`feature`)
 - [#21](https://github.com/udog21/subsounder/issues/21) Multi-currency support (`feature`)
 

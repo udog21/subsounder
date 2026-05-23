@@ -278,6 +278,9 @@ These are the active swim lanes. Apply exactly one to each issue. New tracks sho
 **`techdebt`** — infra and maintainability (continuous; never milestone-gating)
 : CLAUDE.md drift cleanup (e.g. stale entries in "Project Structure") · `lib/parse-trigger.ts` post-ADR-0001 re-evaluation · doc↔code drift listed in [docs/README.md](docs/README.md) "Known gaps" · CI setup · type-check enforcement · `supabase/queries/` proliferation cleanup · dev-loop ergonomics (`npm run dev` vs `npm run preview` parity).
 
+**`marketing`** — marketing, SEO, growth-instrumentation, public content
+: Subscription Registry public site (`subscriptionregistry.org`) and per-merchant cancellation-intel pages · paid acquisition (Reddit + Google Ads) · landing-page conversion hooks · analytics + activation-funnel instrumentation · SEO/sitemap + Search Console setup · brand and messaging. Named `marketing` for breadth — explicitly covers growth-instrumentation work (analytics, conversion tracking) too, not just outward-facing campaigns.
+
 ### Where things land when they don't fit neatly
 
 - **Cancellation-intel work** (the data moat) splits across tracks: user-visible surfacing is `feature`; the enrichment cron + scraping pipeline is `reliability`; user-confirmation flywheels are `feature`.
