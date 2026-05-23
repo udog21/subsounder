@@ -1,21 +1,36 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-14. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/) — each milestone item below typically spawns 1+ issues, tagged with the corresponding GH milestone._
+_Last updated: 2026-05-22. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
 
-## Milestone framework
+## How this roadmap works
 
-| Milestone | Goal | Status |
-|---|---|---|
-| **MVP** | Pipeline works end-to-end (forward → parse → catalog → renewal reminder) | ✅ Done (2026-05-14) |
-| **Private Alpha** | 5-10 invited testers, catalog correctness solid on real data, basic cleanup affordances exist | 🟡 In progress |
-| **Public Beta** | Public sign-up, polished UX, no obvious data-quality landmines | ⚪ Not started |
-| **V1** | Acquisition push (Reddit / ads), monetization clear | ⚪ Not started |
+This roadmap uses a **stage-gate** model. Two kinds of thing:
 
-Each milestone is a *goal*, not a feature list. Work items attach to milestones via GH issue labels.
+- **Milestone** — a *dated event*, a transition (zero duration). Named as an event ("Dogfood begins", "Alpha invites go out"). Some are launches; some are internal transitions.
+- **Phase** — the *period of work between* two milestones. The work lives here.
+
+Each phase carries three fields:
+
+- **Goal** — one line on why the phase exists. Orientation, not a checklist.
+- **Scope** — the work, each item a GitHub issue. This is *output* — within our control.
+- **Gate** — the checkable condition to declare the next milestone reached and cross into the next phase. This is *outcome* — verified, not just shipped.
+
+The discipline: **scope complete is necessary but not sufficient — the Gate is the real bar.** You can close every issue and still fail the Gate (onboarding shipped, but the parser still misfires). Early phases lean on output checks (no users yet to measure); later phases get true outcome gates once a population exists.
 
 ---
 
-## MVP — Done
+## Timeline
+
+| Milestone | Event | Target |
+|---|---|---|
+| **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
+| **M0** | Dogfood officially begins | Mon 2026-05-25 |
+| **M1** | Alpha invites go out | Fri–Sat 2026-05-29/30 |
+| **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
+
+---
+
+## MVP — ✅ reached ~2026-05-14
 
 What landed:
 - Auth (Supabase magic link) → onboarding → pod with unique alias email
@@ -30,97 +45,81 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ---
 
-## Private Alpha (current)
+## Phase 1 — Harden for personal use · *current*
 
-**Goal:** Invite 5-10 friendly testers (people who'll tolerate rough edges and report bugs). Their catalogs should look correct after forwarding 5-10 receipts. No one should see obviously broken data.
+**Goal:** Get the parser and catalog trustworthy enough that Lek will keep his own real subscription data in them.
 
-### Required to start inviting
+**Scope:**
+- [#3](https://github.com/udog21/subsounder/issues/3) Prompt v3 — trial fields, cadence-vs-date consistency, date grounding (`llm`)
+- [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
+- [#7](https://github.com/udog21/subsounder/issues/7) Out-of-order receipts — an older signal must not overwrite newer subscription state (`reliability`)
+- [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup (`techdebt`) — likely resolved by #4 (dismiss the orphans in-UI)
 
-1. **Cleanup affordances.** Users WILL see false positives — orphan data from old prompt versions, parser misfires, services they cancelled long ago. Without a way to dismiss them, the catalog feels broken.
-   - `deleted_by_user` status enum value on `subscriptions`
-   - Catalog kebab menu with "Dismiss" action
-   - Matcher in `lib/parser/match.ts` skips `deleted_by_user` rows when scoring
-   - "Show dismissed" toggle for recovery
-2. **Manual "Mark as cancelled" UI.** Most cancelled subs never send a cancellation email — user has to mark manually.
-3. **v3 prompt iteration.** Known issues from MVP test data:
-   - Trial signals should set `cancel_by_at` to trial-end date so warnings fire
-   - Trial signals should not default `billing_cadence` to `one_time`
-   - When stated cadence conflicts with date-gap math (e.g. n8n monthly tagged as annual), prefer date math or flag for review
-   - For monthly cadences without explicit `next_renewal_at`, infer from `event_date + 1 month`
-4. **Out-of-order receipt handling.** See [open-questions.md](open-questions.md#out-of-order-receipts) — match.ts currently lets older receipts overwrite newer subscription state.
-5. **Onboarding empty state.** Guide first-time users to forward 5-10 recent receipts. Show example/expected timing.
-6. **Test-account cleanup.** Delete orphan v1-era rows (`be19adc5` "Apple" with mismatched plan_name) so the demo looks clean.
+**Gate (→ M0):** Lek's catalog holds ≥12 active personal subscriptions, every one correct or one-click dismissable; forwarded receipts parse cleanly on first pass — any miss is subtle (not glaring) and filed as a GH issue.
 
-### Catalog editing (alpha-scoped portion of a larger surface)
-
-Each catalog card needs a kebab/menu icon exposing:
-- **Dismiss** (alpha) — flip status to `deleted_by_user`. For false positives, services the user doesn't want to track.
-- **Mark as cancelled** (alpha) — flip status to `cancelled`. For subscriptions the user has actually cancelled with the merchant.
-- **Edit** (alpha or beta — scope TBD; see [open-questions.md](open-questions.md)) — modify fields directly. At minimum: display_name, amount, billing_cadence, next_renewal_at. Possibly: plan_name, billed_by, cancellation_url. Decide which fields are user-editable vs. parser-only before building.
-
-The Edit action is the entry point for users maintaining their own catalog manually (services that don't email receipts, parser corrections, etc.). It is foundational for both alpha (small editing) and beta (richer editing). Scope it explicitly before implementing.
-
-### Nice-to-have for alpha
-- Manual "Add subscription" entry (for services that don't email receipts — gym autopay, etc.) — partially overlaps with Edit.
-- Cancellation_confirm signal handling tested end-to-end with a real cancellation email
-- Better default sort order on the catalog
-
-### Out of scope for alpha
-- Marketing site
-- Monetization decisions
-- Gmail OAuth bulk scan
-- Bank connection (Plaid)
+### ◆ M0 — Dogfood officially begins · target Mon 2026-05-25
 
 ---
 
-## Public Beta
+## Phase 2 — Dogfood
 
-**Goal:** Open the gates. Anyone can sign up. UX is polished. Data quality stays trustworthy as cohort scales.
+**Goal:** Lek lives in the product as a real daily user; build the pieces a *second* person will need.
 
-Key bets (will firm up after alpha feedback):
-- Plan-change handling (`price_change` signal + matcher updates) tested with real upgrade emails
-- Cancellation-helper enrichment cron (Phase 7) actually populates `cancellation_url` for new products users add
-- Renewal reminder email validated against real user reactions
-- UI polish round driven by alpha feedback
-- Onboarding flow tightened
-- Resolve at least the product-scope and data-model questions from [open-questions.md](open-questions.md)
-- **Subscription Registry plumbing:** create the `subscription-registry` repo and ship the snapshot-export job that seeds it from `products`. The public site at `subscriptionregistry.org` launches at V1; Beta plumbing exists so V1 launches with real content. Independently branded, each project can survive the other — see [ADR-0002](../adr/0002-subsounder-society-boundary.md) (Naming note at top for the rebrand context).
+**Scope:**
+- [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
+- [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
 
----
+**Gate (→ M1):** Sustained — across the dogfood period (~Mon–Fri), zero *glaring* parser misfires in real ongoing use (subtle ones filed); the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
 
-## V1
-
-**Goal:** Marketing and acquisition. Make people who don't know us start using it.
-
-Likely scope:
-- Marketing landing page (separate from app)
-- **Subscription Registry public launch** (`subscriptionregistry.org`) — free browsable cancellation-intel resource, neutrally branded as a public reference, acts as top-of-funnel for Subsounder. Seeded from `products` via nightly snapshot; community PRs and anonymous experience signals evolve it independently. See [ADR-0002](../adr/0002-subsounder-society-boundary.md).
-- Pricing decision: free / freemium / paid tier
-- Reddit + Google ads campaign
-- Possibly Gmail OAuth bulk-scan for instant catalog seed (huge UX win, high trust ask — may slip to V1.x)
-- Cancellation-difficulty UI as a first-class feature, not a side note
+### ◆ M1 — Alpha invites go out · target Fri–Sat 2026-05-29/30
 
 ---
 
-## Future ingestion channels (parked — assess against priorities each milestone)
+## Phase 3 — Private Alpha
 
-Today's only ingestion channel is **email forwarding to the alias**. Each of the channels below would broaden how a user populates their catalog. Listed in rough order of effort × payoff for our positioning ("subscriptions that email you a receipt"); none are currently scheduled.
+**Goal:** Prove the funnel works on strangers' real inboxes before spending a cent on ads — and build M2's prerequisites in parallel.
 
-| Channel | Effort | Value | Likely milestone | Notes |
-|---|---|---|---|---|
-| Manual "Add subscription" form | Low | High for services that don't email | Alpha / Beta | Overlaps with the Edit flow above — likely the same UI surface |
-| CSV import | Low | Niche / power users | Beta+ | Optional |
-| Gmail OAuth → bulk-scan last 90 days | High (auth + trust) | Very high — instant catalog | V1 | Massive UX win at signup, big trust ask. May slip to V1.x |
-| Bank / card connection (Plaid) | Very high | Very high but a different product | Probably never | Competes with Rocket Money. Different market positioning. |
-| Forward-from-Gmail browser extension | Med | Reduces friction of "select email → forward → return to app" | Beta+ | Only if friction data from alpha shows this matters |
+**Scope — alpha experience:**
+- [#6](https://github.com/udog21/subsounder/issues/6) Edit subscription — minimal field set (`feature`)
+- [#15](https://github.com/udog21/subsounder/issues/15) Free trial countdown UI on catalog cards (`feature`)
 
-This table is a *placeholder* so future planning has a known set of options to weigh against new ideas. Promote items into milestone sections when prioritized.
+**Scope — M2 prerequisites (built in parallel):**
+- [#16](https://github.com/udog21/subsounder/issues/16) Public self-serve signup — remove invite gating (`feature`)
+- [#17](https://github.com/udog21/subsounder/issues/17) Analytics + conversion-funnel instrumentation — no ad tracking = no ads (`techdebt`)
+- [#18](https://github.com/udog21/subsounder/issues/18) Cancellation-intel research — top 50–100 providers, ranked by "how to cancel X" search volume (`feature`)
+- [#19](https://github.com/udog21/subsounder/issues/19) Registry site — scaffold `subscription-registry` repo + publish provider pages (`feature`)
+- [#20](https://github.com/udog21/subsounder/issues/20) Spend total as a first-class headline number — the conversion hook (`feature`)
+- [#21](https://github.com/udog21/subsounder/issues/21) Multi-currency support (`feature`)
+
+**Gate (→ M2):** ≥5 invited testers activate — catalog reaches ≥3 correct subscriptions — within 2 weeks of their invite; no tester hits an unexplained, trust-breaking data error.
+
+### ◆ M2 — Public Beta launch + paid search ads · date set after M1
+
+---
+
+## Beyond M2 (V1 horizon — parked)
+
+Not scheduled. Promote into a phase when prioritized.
+
+- [#22](https://github.com/udog21/subsounder/issues/22) Spend analytics charts (`feature`)
+- [#23](https://github.com/udog21/subsounder/issues/23) Family / pod sharing (`feature`)
+- Scale paid spend — ramp daily budget as unit economics hold
+- Monetization decision — free / freemium / paid tier
+- Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated; see [competitive-analysis.md](../competitive-analysis.md))
+- Other ingestion channels — CSV import, browser-extension forwarder
+- Bank/card connection (Plaid) — explicitly out of scope; a different product class (competes with Rocket Money)
+
+---
+
+## Registry — a note on scope
+
+The Subscription Registry (`subscriptionregistry.org`) is, for *roadmap* purposes, a prerequisite work-stream of M2 (issues #18 and #19) — not a milestone of its own. Architecturally it stays separate: its own repo, its own brand, per [ADR-0002](../adr/0002-subsounder-society-boundary.md). One is a planning lens, the other an architecture decision — no conflict.
 
 ---
 
 ## Where this doc lives in the workflow
 
-- **Update this doc** when milestone goals shift, when a milestone is achieved, or when a major scope decision lands.
-- **Don't** put bug fixes, individual refactors, or one-off chores here — those are gh issues.
-- **Do** put each milestone item under the corresponding GH milestone (Private Alpha, etc.) when creating issues.
-- When asking an agent "what should I work on next," the answer is: highest-priority unfinished item under the current milestone, ideally one that's been broken into a discrete gh issue.
+- **Update this doc** when a phase's Goal/Scope/Gate changes, when a milestone is reached, or when a major scope decision lands.
+- **Don't** put bug fixes, individual refactors, or one-off chores here — those are GH issues inside a phase's Scope.
+- Each phase's Scope maps to GH issues; group them under the matching GH milestone (M0/M1/M2).
+- When asking an agent "what should I work on next," the answer is: the highest-priority open issue in the *current* phase's Scope.
