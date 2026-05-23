@@ -87,6 +87,9 @@ Rules:
 - `main` is always releasable. Never merge half-built work.
 - Branches live hours/days, not weeks.
 - Never skip hooks or push to `main` directly.
+- Always run `git status` immediately before every commit/push. The active
+  branch can change between conversation turns (e.g. a PR merge plus a local
+  switch). Never rely on session-cached branch assumptions — verify, then act.
 
 ## Stack
 | Layer | Choice |
