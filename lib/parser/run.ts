@@ -57,6 +57,20 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       return { status: 'skipped', reason: 'already_processed' }
     }
 
+    const fromDomain = (receipt.from_domain ?? '').toLowerCase()
+    if (fromDomain === 'subsounder.com' || fromDomain.endsWith('.subsounder.com')) {
+      await supabase
+        .from('inbound_receipts')
+        .update({
+          parser_status: 'ignored',
+          write_decision: 'skipped',
+          write_reason: 'self_sender_loopback',
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', receipt_id)
+      return { status: 'skipped', reason: 'self_sender_loopback' }
+    }
+
     const { normalized_text, input_hash, input_excerpt } = normalize({
       bodyText: receipt.body_text ?? undefined,
       bodyHtml: receipt.body_html ?? undefined,
