@@ -77,11 +77,11 @@ export default function LoginPage() {
 
       if (session?.user) {
         // Check if profile exists
-        const { data: profile, error } = await supabase
+        const { data: profile } = await supabase
           .from('profiles')
           .select('id')
           .eq('id', session.user.id)
-          .single()
+          .maybeSingle()
 
         if (profile) {
           router.push('/')
@@ -102,7 +102,7 @@ export default function LoginPage() {
           .from('profiles')
           .select('id')
           .eq('id', session.user.id)
-          .single()
+          .maybeSingle()
 
         if (profile) {
           router.push('/')
