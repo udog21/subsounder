@@ -2,6 +2,10 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import CopyButton from './components/CopyButton'
+import ViewSourcePanel, {
+  type SourceReceipt,
+  buildGmailUrl,
+} from './components/ViewSourcePanel'
 import styles from './page.module.css'
 
 type Subscription = {
@@ -126,7 +130,15 @@ function TrialCountdown({ cancel_by_at, trial_ends_at }: { cancel_by_at: string 
   )
 }
 
-function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean }) {
+function SubscriptionCard({
+  sub,
+  receipts,
+  dimmed,
+}: {
+  sub: Subscription
+  receipts?: SourceReceipt[]
+  dimmed?: boolean
+}) {
   const renewal = formatRenewalDate(sub.next_renewal_at)
   const cancelSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(sub.display_name + ' cancel subscription')}`
 
@@ -191,6 +203,8 @@ function SubscriptionCard({ sub, dimmed }: { sub: Subscription; dimmed?: boolean
           )}
         </div>
       </div>
+
+      {receipts && receipts.length > 0 && <ViewSourcePanel receipts={receipts} />}
     </div>
   )
 }
@@ -249,12 +263,51 @@ export default async function HomePage() {
       return new Date(a.next_renewal_at).getTime() - new Date(b.next_renewal_at).getTime()
     })
 
-  const active = subscriptions.filter((s) => s.status !== 'cancelled')
   const cancelled = subscriptions.filter((s) => s.status === 'cancelled')
+  const uncancelled = subscriptions.filter((s) => s.status !== 'cancelled')
+  const active = uncancelled.filter((s) => s.amount != null)
+  const needsReview = uncancelled.filter((s) => s.amount == null)
 
   const annualBurn = annualEquivalent(active)
   const hasNonUsd = active.some((s) => s.amount && s.currency && s.currency !== 'USD')
   const currencyLabel = hasNonUsd ? ' (USD)' : ''
+
+  // Fetch source receipts only for NR subs (View Source is NR-scoped in v1).
+  const receiptsBySubId = new Map<string, SourceReceipt[]>()
+  if (needsReview.length > 0) {
+    const nrIds = needsReview.map((s) => s.id)
+    const { data: soundingRows } = await svc
+      .from('soundings_log')
+      .select(
+        'resolved_subscription_id, inbound_receipt:inbound_receipts!soundings_log_inbound_receipt_id_fkey(id, message_id, subject, from_email, received_at)',
+      )
+      .eq('pod_id', profile.pod_id)
+      .in('resolved_subscription_id', nrIds)
+      .order('created_at', { ascending: false })
+
+    for (const row of soundingRows ?? []) {
+      const subId = row.resolved_subscription_id as string | null
+      if (!subId) continue
+      const r = Array.isArray(row.inbound_receipt) ? row.inbound_receipt[0] : row.inbound_receipt
+      if (!r) continue
+      const messageId = (r.message_id as string | null) ?? null
+      const fromEmail = (r.from_email as string | null) ?? null
+      const receipt: SourceReceipt = {
+        id: r.id as string,
+        message_id: messageId,
+        subject: (r.subject as string | null) ?? null,
+        from_email: fromEmail,
+        received_at: r.received_at as string,
+        gmail_url: buildGmailUrl(messageId, user.email ?? null),
+      }
+      const arr = receiptsBySubId.get(subId)
+      if (arr) {
+        if (!arr.some((x) => x.id === receipt.id)) arr.push(receipt)
+      } else {
+        receiptsBySubId.set(subId, [receipt])
+      }
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -294,9 +347,29 @@ export default async function HomePage() {
 
         {active.length > 0 && (
           <div className={styles.activeSection}>
-            <div className={styles.list}>
+            <div className={`${styles.list} ${styles.listScroll}`}>
               {active.map((sub) => (
                 <SubscriptionCard key={sub.id} sub={sub} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {needsReview.length > 0 && (
+          <div className={styles.needsReviewSection}>
+            <div className={styles.needsReviewLabel}>
+              Needs Review · {needsReview.length}
+            </div>
+            <div className={styles.needsReviewSub}>
+              Missing price or renewal — not counted in the annual total.
+            </div>
+            <div className={`${styles.list} ${styles.listScrollShort}`}>
+              {needsReview.map((sub) => (
+                <SubscriptionCard
+                  key={sub.id}
+                  sub={sub}
+                  receipts={receiptsBySubId.get(sub.id) ?? []}
+                />
               ))}
             </div>
           </div>
@@ -305,7 +378,7 @@ export default async function HomePage() {
         {cancelled.length > 0 && (
           <div>
             <div className={styles.cancelledLabel}>Cancelled</div>
-            <div className={styles.list}>
+            <div className={`${styles.list} ${styles.listScrollShort}`}>
               {cancelled.map((sub) => (
                 <SubscriptionCard key={sub.id} sub={sub} dimmed />
               ))}
