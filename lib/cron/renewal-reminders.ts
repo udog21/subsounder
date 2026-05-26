@@ -18,6 +18,7 @@ export async function runRenewalReminders(): Promise<RunRenewalRemindersResult> 
     )
     .eq('reminder_enabled', true)
     .eq('status', 'active')
+    .eq('deleted_by_user', false)
 
   if (subsError) {
     return { status: 'failed', message: subsError.message }
