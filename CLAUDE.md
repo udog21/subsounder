@@ -57,6 +57,17 @@ correction.
   later stages lighter. Flag slow-bleed risk (chronic under-resourcing) so a
   clean pause can be chosen over a slow one. Working norms that transfer
   across projects belong here in CLAUDE.md, not in agent memory.
+- **Honest estimates: scope to active effort, call out exclusions inline.**
+  Time estimates anchor on human-engineer intuition that silently pads for
+  context-switching, mid-coding design pivots, and test-loop overhead. In a
+  focused agent session where design is locked in conversation before coding
+  starts, observed durations land roughly 0.4× human-eyeball estimates; ~0.7×
+  for mixed design/implementation. Take face value (no compression) for
+  browser/UI debugging, scheduler/cron diagnosis, or unfamiliar-codebase
+  navigation — those carry real wall-clock overhead that doesn't compress
+  away. Before quoting a number, name which class the task is in and state
+  the exclusions inline ("~2h once the design is locked; longer if we keep
+  iterating on the schema shape"), not implicitly.
 
 ### Asks of the solo founder/dev
 
