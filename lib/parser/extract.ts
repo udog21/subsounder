@@ -10,11 +10,13 @@ export interface ExtractionSignal {
     | 'subscription_confirm'
     | 'cancellation_confirm'
     | 'price_change'
-  merchant_name: string | null
-  merchant_domain: string | null
+  provider_name: string | null
+  provider_domain: string | null
+  product: string | null
+  plan_name: string | null
+  instance: string | null
   billed_by_name: string | null
   billed_by_domain: string | null
-  plan_name: string | null
   amount: number | null
   currency: string | null
   billing_cadence: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annual' | 'one_time' | null
@@ -48,11 +50,13 @@ const SIGNAL_SCHEMA = {
         'price_change',
       ],
     },
-    merchant_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    merchant_domain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    provider_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    provider_domain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    product: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    plan_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    instance: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     billed_by_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     billed_by_domain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    plan_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     amount: { anyOf: [{ type: 'number' }, { type: 'null' }] },
     currency: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     billing_cadence: {
@@ -72,11 +76,13 @@ const SIGNAL_SCHEMA = {
   },
   required: [
     'signal_type',
-    'merchant_name',
-    'merchant_domain',
+    'provider_name',
+    'provider_domain',
+    'product',
+    'plan_name',
+    'instance',
     'billed_by_name',
     'billed_by_domain',
-    'plan_name',
     'amount',
     'currency',
     'billing_cadence',
@@ -104,7 +110,6 @@ const EXTRACTION_SCHEMA = {
   additionalProperties: false,
 }
 
-// Fallback used when no active prompt is found in prompt_templates
 const FALLBACK_SYSTEM_PROMPT = `You are a subscription email parser. Extract billing and subscription signals from forwarded emails.
 
 Classify the email and extract any subscription signals:
@@ -115,13 +120,11 @@ Classify the email and extract any subscription signals:
 
 For "not_subscription" and "spam": return signals = []
 
-Field rules:
-- event_date = the date of this specific email's event (charge date, renewal notice date, etc.) in ISO 8601
-- merchant_domain = root domain of the service (e.g. "netflix.com"), not the sender email domain
-- billed_by_domain = billing entity's domain (e.g. "apple.com" if billed through Apple)
-- amount = numeric only, no currency symbols
-- currency = ISO 4217 three-letter code (USD, EUR, GBP, etc.)
-- All dates must be ISO 8601 (YYYY-MM-DD or full datetime with timezone)`
+Identity layers — fill all four:
+- provider_name = the brand/company that bills the user
+- product = the service line within the provider (null if the provider IS the product)
+- plan_name = the tier within the product (mutable)
+- instance = the immutable per-instance identity (e.g. domain at a registrar)`
 
 export async function extract(
   normalizedText: string,

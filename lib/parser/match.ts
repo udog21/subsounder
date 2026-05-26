@@ -7,7 +7,9 @@ export interface ExistingSubscription {
   billed_by_name: string | null
   billed_by_domain: string | null
   display_name: string
+  product: string | null
   plan_name: string | null
+  instance: string | null
   last_observed_content_date: string | null
   status: string
 }
@@ -19,7 +21,9 @@ export interface SubscriptionUpsert {
   provider_domain: string | null
   billed_by_name: string | null
   billed_by_domain: string | null
+  product: string | null
   plan_name: string | null
+  instance: string | null
   last_observed_content_date: string | null
   last_source_type: string
   source: string
@@ -46,9 +50,9 @@ export interface MatchResult {
 
 const MATCH_THRESHOLD = 60
 
-function normalizeName(name: string | null | undefined): string {
-  if (!name) return ''
-  return name
+function normalizeText(text: string | null | undefined): string {
+  if (!text) return ''
+  return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
@@ -59,9 +63,9 @@ function scoreMatch(signal: ExtractionSignal, existing: ExistingSubscription): n
   let score = 0
 
   if (
-    signal.merchant_domain &&
+    signal.provider_domain &&
     existing.provider_domain &&
-    signal.merchant_domain.toLowerCase() === existing.provider_domain.toLowerCase()
+    signal.provider_domain.toLowerCase() === existing.provider_domain.toLowerCase()
   ) {
     score += 40
   }
@@ -74,8 +78,8 @@ function scoreMatch(signal: ExtractionSignal, existing: ExistingSubscription): n
     score += 35
   }
 
-  const signalName = normalizeName(signal.merchant_name)
-  const existingName = normalizeName(existing.display_name)
+  const signalName = normalizeText(signal.provider_name)
+  const existingName = normalizeText(existing.display_name)
   if (signalName && existingName) {
     if (signalName === existingName) {
       score += 25
@@ -84,12 +88,36 @@ function scoreMatch(signal: ExtractionSignal, existing: ExistingSubscription): n
     }
   }
 
-  if (
-    signal.plan_name &&
-    existing.plan_name &&
-    normalizeName(signal.plan_name) === normalizeName(existing.plan_name)
-  ) {
-    score += 15
+  // product: layer below provider. Mismatch is a strong "distinct product within
+  // same provider" signal (e.g. Adobe Photoshop vs Adobe Lightroom). Asymmetric
+  // null handling — signal-has/existing-null leans toward "new structured row,
+  // not enrichment"; existing-has/signal-null is permitted as bare-signal coverage.
+  const signalProduct = normalizeText(signal.product)
+  const existingProduct = normalizeText(existing.product)
+  if (signalProduct && existingProduct) {
+    if (signalProduct === existingProduct) score += 15
+    else score -= 25
+  } else if (signalProduct && !existingProduct) {
+    score -= 10
+  }
+
+  // instance: identity layer. Mismatch is almost always a different subscription
+  // (lightbox.house vs busyskipper.bot at the same registrar). Strongest penalty.
+  const signalInstance = normalizeText(signal.instance)
+  const existingInstance = normalizeText(existing.instance)
+  if (signalInstance && existingInstance) {
+    if (signalInstance === existingInstance) score += 15
+    else score -= 40
+  } else if (signalInstance && !existingInstance) {
+    score -= 15
+  }
+
+  // plan_name: mutable tier. Match boosts but mismatch carries no penalty —
+  // plan changes (Basic → Premium) update in place, they do not fork.
+  const signalPlan = normalizeText(signal.plan_name)
+  const existingPlan = normalizeText(existing.plan_name)
+  if (signalPlan && existingPlan && signalPlan === existingPlan) {
+    score += 5
   }
 
   return score
@@ -104,12 +132,14 @@ function deriveStatus(signalType: string): string {
 function buildSubscriptionPayload(signal: ExtractionSignal, podId: string): SubscriptionUpsert {
   return {
     pod_id: podId,
-    display_name: signal.merchant_name ?? signal.billed_by_name ?? 'Unknown',
-    provider_name: signal.merchant_name,
-    provider_domain: signal.merchant_domain,
+    display_name: signal.provider_name ?? signal.billed_by_name ?? 'Unknown',
+    provider_name: signal.provider_name,
+    provider_domain: signal.provider_domain,
     billed_by_name: signal.billed_by_name,
     billed_by_domain: signal.billed_by_domain,
+    product: signal.product,
     plan_name: signal.plan_name,
+    instance: signal.instance,
     last_observed_content_date: signal.event_date,
     last_source_type: 'inbound_receipt',
     source: 'parser',
@@ -134,25 +164,60 @@ function buildUpdateSubscriptionPayload(
   if (isNewer) {
     return {
       ...base,
-      provider_name: signal.merchant_name ?? existing.provider_name,
-      provider_domain: signal.merchant_domain ?? existing.provider_domain,
+      provider_name: signal.provider_name ?? existing.provider_name,
+      provider_domain: signal.provider_domain ?? existing.provider_domain,
       billed_by_name: signal.billed_by_name ?? existing.billed_by_name,
       billed_by_domain: signal.billed_by_domain ?? existing.billed_by_domain,
+      product: signal.product ?? existing.product,
       plan_name: signal.plan_name ?? existing.plan_name,
+      instance: signal.instance ?? existing.instance,
       last_observed_content_date: signal.event_date ?? existing.last_observed_content_date,
     }
   }
 
-  // Older signal: only fill fields currently null on the existing record
+  // Older signal: only fill fields currently null on the existing record. #7
+  // out-of-order guard — a January receipt forwarded in May must not overwrite
+  // the May renewal_at that landed earlier.
   return {
     ...base,
-    provider_name: existing.provider_name ?? signal.merchant_name,
-    provider_domain: existing.provider_domain ?? signal.merchant_domain,
+    provider_name: existing.provider_name ?? signal.provider_name,
+    provider_domain: existing.provider_domain ?? signal.provider_domain,
     billed_by_name: existing.billed_by_name ?? signal.billed_by_name,
     billed_by_domain: existing.billed_by_domain ?? signal.billed_by_domain,
+    product: existing.product ?? signal.product,
     plan_name: existing.plan_name ?? signal.plan_name,
+    instance: existing.instance ?? signal.instance,
     last_observed_content_date: existing.last_observed_content_date ?? signal.event_date,
   }
+}
+
+function advanceByCadence(iso: string, cadence: string): string {
+  const d = new Date(iso)
+  if (cadence === 'weekly') d.setUTCDate(d.getUTCDate() + 7)
+  else if (cadence === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1)
+  else if (cadence === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3)
+  else if (cadence === 'annual') d.setUTCFullYear(d.getUTCFullYear() + 1)
+  else if (cadence === 'daily') d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString()
+}
+
+// #7: stale-renewal-notice reconciliation. When we receive a renewal_notice or
+// receipt whose stated next_renewal_at is already in the past (the email was
+// forwarded weeks or months after the renewal occurred), project forward by
+// cadence so the catalog shows a current cycle, not a stale historical one.
+function reconcileNextRenewal(
+  next_renewal_at: string | null,
+  cadence: string | null,
+): string | null {
+  if (!next_renewal_at || !cadence) return next_renewal_at
+  if (cadence === 'one_time') return next_renewal_at
+  const now = Date.now()
+  let current = next_renewal_at
+  for (let i = 0; i < 60; i++) {
+    if (new Date(current).getTime() > now) return current
+    current = advanceByCadence(current, cadence)
+  }
+  return current
 }
 
 function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
@@ -162,7 +227,7 @@ function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
     currency: signal.currency,
     billing_cadence: signal.billing_cadence,
     period_start: signal.event_date,
-    next_renewal_at: signal.next_renewal_at,
+    next_renewal_at: reconcileNextRenewal(signal.next_renewal_at, signal.billing_cadence),
     cancel_by_at: signal.cancel_by_at,
   }
 }
