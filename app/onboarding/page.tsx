@@ -9,33 +9,60 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(true)
+  const [initError, setInitError] = useState<string | null>(null)
   const router = useRouter()
 
   // Check auth and existing profile
   useEffect(() => {
-    const checkAuth = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
+    let cancelled = false
 
-      if (!session?.user) {
-        router.push('/login')
-        return
-      }
-
-      // Check if profile already exists
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', session.user.id)
-        .single()
-
-      if (profile) {
-        router.push('/')
-        return
-      }
-
+    // Safety net: if the auth check silently stalls (e.g. cookie collision
+    // from a multi-tab session), surface an error instead of hanging on
+    // "Loading..." forever.
+    const timeoutId = setTimeout(() => {
+      if (cancelled) return
+      setInitError(
+        "Couldn't verify your session. This usually means a cookie issue — try clearing site data or signing in again."
+      )
       setChecking(false)
+    }, 5000)
+
+    const checkAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+
+        if (cancelled) return
+
+        if (!session?.user) {
+          clearTimeout(timeoutId)
+          router.push('/login')
+          return
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', session.user.id)
+          .maybeSingle()
+
+        if (cancelled) return
+
+        if (profile) {
+          clearTimeout(timeoutId)
+          router.push('/')
+          return
+        }
+
+        clearTimeout(timeoutId)
+        setChecking(false)
+      } catch (err: any) {
+        if (cancelled) return
+        clearTimeout(timeoutId)
+        setInitError(err?.message || 'Failed to verify session.')
+        setChecking(false)
+      }
     }
 
     checkAuth()
@@ -50,6 +77,8 @@ export default function OnboardingPage() {
     })
 
     return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
       subscription.unsubscribe()
     }
   }, [router])
@@ -97,6 +126,55 @@ export default function OnboardingPage() {
         }}
       >
         <div style={{ color: '#cccccc' }}>Loading...</div>
+      </div>
+    )
+  }
+
+  if (initError) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+        }}
+      >
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '400px',
+            background: '#111111',
+            border: '1px solid #333333',
+            borderRadius: '8px',
+            padding: '32px',
+          }}
+        >
+          <h1 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '16px' }}>
+            Something went wrong
+          </h1>
+          <p style={{ fontSize: '14px', color: '#cccccc', marginBottom: '24px' }}>
+            {initError}
+          </p>
+          <a
+            href="/login"
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '12px',
+              background: '#ffffff',
+              color: '#000000',
+              borderRadius: '4px',
+              fontSize: '14px',
+              fontWeight: '500',
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            Back to login
+          </a>
+        </div>
       </div>
     )
   }
