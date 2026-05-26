@@ -116,6 +116,7 @@ Rules:
 - **Dedup:** `INSERT ... ON CONFLICT (pod_id, dedupe_key) DO NOTHING` — never a pre-check query
 - **LLM output is always `signals[]` array** — supports 1:N extractions from day one
 - **Service role key** for all server-side DB writes (bypasses RLS); anon key only for client auth
+- **4-layer subscription identity:** every signal carries `provider` / `product` / `plan` / `instance`. The matcher's identity key is `(pod_id, product_id, instance)`; `plan` is a mutable attribute (plan upgrades update in place, never fork). See [glossary.md](docs/active/glossary.md#identity-layers) for the vocabulary.
 
 ## Project Structure
 ```
@@ -147,11 +148,11 @@ supabase/
 ## Database Schema (key tables)
 - `pods` — subscription group, one per user; holds `alias_email`
 - `profiles` — user profile; `auth_user_id` links to `auth.users`
-- `products` — one row per product (e.g. YouTube, Google One, Spotify Premium — not one per company); `name`, `website`, `aliases[]`, `cancellation_url`, `cancellation_difficulty` (1–5), `cancellation_steps`, `parent_product_id` (corporate grouping), `pricing jsonb` (`[{period, price, currency}]`), `enrichment_status` (`pending | enriched | fetch_failed`)
+- `products` — one row per `(provider, product)` tuple (e.g. `(Google, Google Home)`, `(Adobe, Photoshop)`, `(GoDaddy, Domain Registration)`). `provider_name`, `name` (product), `website`, `aliases[]`, `cancellation_url`, `cancellation_difficulty` (1–5), `cancellation_steps`, `parent_product_id` (corporate grouping), `pricing jsonb` (`[{period, price, currency}]`), `enrichment_status` (`pending | enriched | fetch_failed`). Uniqueness on `(lower(website), lower(name))` — N products per provider allowed (Photoshop vs Lightroom).
 - `inbound_receipts` — raw email signals; `parser_status` = `pending | parsed | ignored | error`
 - `parser_runs` — control plane, one row per parse attempt; links to `inbound_receipts`
-- `soundings_log` — data plane, one row per extracted signal; `parser_run_id` FK; `resolved_subscription_id` set after matching
-- `subscriptions` — identity + current state roll-up; no financial columns; `current_cycle_id` FK points to the most recent `subscription_cycles` row; `product_id`, `cancellation_url`, `cancellation_difficulty` denormalized from `products`
+- `soundings_log` — data plane, one row per extracted signal; `parser_run_id` FK; identity columns `provider_name`, `provider_domain`, `product`, `instance`; `resolved_subscription_id` set after matching
+- `subscriptions` — identity + current state roll-up; no financial columns; `current_cycle_id` FK points to the most recent `subscription_cycles` row; `product_id`, `product` (denorm), `instance`, `cancellation_url`, `cancellation_difficulty` denormalized from `products`; `deleted_by_user` boolean for Dismiss. Identity uniqueness is `(pod_id, product_id, instance) WHERE deleted_by_user IS NOT TRUE` — dismissed rows do not block fresh matches at the same identity.
 - `subscription_cycles` — one row per billing event (including trials with `amount=0`); holds `amount`, `currency`, `billing_cadence`, `period_start`, `period_end`, `next_renewal_at`, `cancel_by_at`, `signal_type`, `source_sounding_id`
 - `prompt_templates` — versioned LLM system prompts; one row per `(agent_name, version)`; exactly one row per `agent_name` is `is_active = true` (enforced by `prompt_templates_one_active` partial unique index)
 

@@ -165,9 +165,10 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       supabase
         .from('subscriptions')
         .select(
-          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, plan_name, last_observed_content_date, status',
+          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, product, plan_name, instance, last_observed_content_date, status',
         )
-        .eq('pod_id', pod_id),
+        .eq('pod_id', pod_id)
+        .eq('deleted_by_user', false),
       supabase.from('profiles').select('email').eq('pod_id', pod_id).maybeSingle(),
     ])
 
@@ -182,6 +183,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
     let emailsSent = 0
     let emailsFailed = 0
     const emailErrors: string[] = []
+    const writeErrors: string[] = []
 
     for (const signal of valid.signals) {
       const { data: sounding, error: soundingError } = await supabase
@@ -191,11 +193,13 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           pod_id,
           inbound_receipt_id: receipt_id,
           signal_type: signal.signal_type,
-          merchant_name: signal.merchant_name,
-          merchant_domain: signal.merchant_domain,
+          provider_name: signal.provider_name,
+          provider_domain: signal.provider_domain,
+          product: signal.product,
+          plan_name: signal.plan_name,
+          instance: signal.instance,
           billed_by_name: signal.billed_by_name,
           billed_by_domain: signal.billed_by_domain,
-          plan_name: signal.plan_name,
           amount: signal.amount,
           currency: signal.currency,
           billing_cadence: signal.billing_cadence,
@@ -209,7 +213,12 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
         .select('id')
         .single()
 
-      if (soundingError || !sounding) continue
+      if (soundingError) {
+        writeErrors.push(`sounding_insert_failed: ${soundingError.message}`)
+        console.error('[run-parse] sounding insert error:', soundingError)
+        continue
+      }
+      if (!sounding) continue
       soundingsWritten++
 
       const matchResult = match(signal, subs, pod_id)
@@ -218,12 +227,18 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       let cancellationUrl: string | null = null
       let cancellationDifficulty: number | null = null
 
-      if (signal.merchant_domain) {
-        const domain = signal.merchant_domain.toLowerCase()
+      if (signal.provider_domain) {
+        const domain = signal.provider_domain.toLowerCase()
+        // For multi-product providers (Adobe Photoshop vs Adobe Lightroom), the
+        // signal's `product` discriminates. For single-product providers (Spotify,
+        // Netflix), product is null and we fall back to provider_name so we still
+        // find or create the right products row.
+        const productName = signal.product ?? signal.provider_name ?? domain
         const { data: product } = await supabase
           .from('products')
           .select('id, cancellation_url, cancellation_difficulty')
           .eq('website', domain)
+          .ilike('name', productName)
           .maybeSingle()
 
         if (product) {
@@ -231,15 +246,20 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           cancellationUrl = product.cancellation_url
           cancellationDifficulty = product.cancellation_difficulty
         } else {
-          const { data: newProduct } = await supabase
+          const { data: newProduct, error: productInsertError } = await supabase
             .from('products')
             .insert({
-              name: signal.merchant_name ?? domain,
+              name: productName,
+              provider_name: signal.provider_name ?? domain,
               website: domain,
               enrichment_status: 'pending',
             })
             .select('id')
             .single()
+          if (productInsertError) {
+            writeErrors.push(`product_insert_failed: ${productInsertError.message}`)
+            console.error('[run-parse] product insert error:', productInsertError)
+          }
           if (newProduct) productId = newProduct.id
         }
       }
@@ -260,7 +280,10 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           .select('id')
           .single()
 
-        if (!subInsertError && newSub) {
+        if (subInsertError) {
+          writeErrors.push(`sub_insert_failed: ${subInsertError.message}`)
+          console.error('[run-parse] subscription insert error:', subInsertError, 'payload:', subPayload)
+        } else if (newSub) {
           resolvedSubscriptionId = newSub.id
           subscriptionsInserted++
           subs.push({
@@ -270,7 +293,9 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
             billed_by_name: matchResult.subscriptionPayload.billed_by_name,
             billed_by_domain: matchResult.subscriptionPayload.billed_by_domain,
             display_name: matchResult.subscriptionPayload.display_name,
+            product: matchResult.subscriptionPayload.product,
             plan_name: matchResult.subscriptionPayload.plan_name,
+            instance: matchResult.subscriptionPayload.instance,
             last_observed_content_date: matchResult.subscriptionPayload.last_observed_content_date,
             status: matchResult.subscriptionPayload.status,
           })
@@ -281,7 +306,10 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           .update(subPayload)
           .eq('id', matchResult.matched_id)
 
-        if (!subUpdateError) {
+        if (subUpdateError) {
+          writeErrors.push(`sub_update_failed: ${subUpdateError.message}`)
+          console.error('[run-parse] subscription update error:', subUpdateError, 'payload:', subPayload)
+        } else {
           resolvedSubscriptionId = matchResult.matched_id
           subscriptionsUpdated++
           const idx = subs.findIndex((s) => s.id === matchResult.matched_id)
@@ -294,7 +322,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       }
 
       if (resolvedSubscriptionId) {
-        const { data: newCycle } = await supabase
+        const { data: newCycle, error: cycleInsertError } = await supabase
           .from('subscription_cycles')
           .insert({
             subscription_id: resolvedSubscriptionId,
@@ -304,11 +332,47 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           .select('id')
           .single()
 
+        if (cycleInsertError) {
+          writeErrors.push(`cycle_insert_failed: ${cycleInsertError.message}`)
+          console.error('[run-parse] cycle insert error:', cycleInsertError)
+        }
+
         if (newCycle) {
-          await supabase
+          // #7 cycle-promotion guard: don't promote a cycle whose next_renewal_at
+          // is older than the existing current cycle's. The Google Home triple-
+          // forward bug surfaced because a higher-confidence stale cycle was
+          // overwriting a properly-future one. We prefer the future date over
+          // raw confidence in this tiebreak.
+          const { data: currentSub } = await supabase
             .from('subscriptions')
-            .update({ current_cycle_id: newCycle.id })
+            .select('current_cycle_id')
             .eq('id', resolvedSubscriptionId)
+            .single()
+
+          let promote = true
+          if (currentSub?.current_cycle_id && currentSub.current_cycle_id !== newCycle.id) {
+            const { data: existingCycle } = await supabase
+              .from('subscription_cycles')
+              .select('next_renewal_at')
+              .eq('id', currentSub.current_cycle_id)
+              .maybeSingle()
+
+            const newRenewal = matchResult.cyclePayload.next_renewal_at
+            const existingRenewal = existingCycle?.next_renewal_at ?? null
+
+            if (existingRenewal && newRenewal) {
+              promote = new Date(newRenewal).getTime() >= new Date(existingRenewal).getTime()
+            } else if (existingRenewal && !newRenewal) {
+              promote = false
+            }
+          }
+
+          if (promote) {
+            await supabase
+              .from('subscriptions')
+              .update({ current_cycle_id: newCycle.id })
+              .eq('id', resolvedSubscriptionId)
+          }
         }
       }
 
@@ -355,7 +419,11 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
           emails_sent: emailsSent,
           emails_failed: emailsFailed,
           ...(emailErrors.length > 0 ? { email_errors: emailErrors } : {}),
+          ...(writeErrors.length > 0 ? { write_errors: writeErrors } : {}),
         },
+        ...(writeErrors.length > 0
+          ? { error_detail: writeErrors.join('; ') }
+          : {}),
       })
       .eq('id', parserRunId)
 
@@ -368,15 +436,20 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
             ? 'skipped'
             : 'no_signal'
 
+    const hasWriteErrors = writeErrors.length > 0
+
     await supabase
       .from('inbound_receipts')
       .update({
-        parser_status: parser_run_status === 'error' ? 'error' : 'parsed',
+        parser_status: parser_run_status === 'error' || hasWriteErrors ? 'error' : 'parsed',
         last_parser_run_id: parserRunId,
         resolved_subscription_id: firstResolvedSubscriptionId,
         write_decision: writeDecision,
         write_reason: parser_run_status,
         processed_at: new Date().toISOString(),
+        ...(hasWriteErrors
+          ? { error_code: 'write_failed', error_detail: writeErrors.join('; ') }
+          : {}),
       })
       .eq('id', receipt_id)
 

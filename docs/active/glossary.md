@@ -44,8 +44,20 @@ Terms are grouped by where they live in the pipeline. Within each group: alphabe
 | **cancellation difficulty** | A 1–5 `smallint` (1 = self-serve easy, 5 = dark-pattern hard). Lives on both `products` (canonical) and `subscriptions` (per-user override). |
 | **`current_cycle_id`** | FK from `subscriptions` to its most recent `subscription_cycles` row. UI reads amount, currency, cadence, dates through this join — never directly from `subscriptions`, which holds identity only. |
 | **cycle** / **subscription cycle** | A row in `subscription_cycles` — one billing event (trial, receipt, renewal, cancellation). Holds the financials and temporal bounds. Trials have `amount = 0`. |
+| **dismiss** / **`deleted_by_user`** | A boolean on `subscriptions` set when the user dismisses a row from the catalog. Excluded from the matcher's existing-subs lookup, so a future receipt at the same identity creates a fresh row instead of resurrecting the dismissed one. Also excluded from the partial unique index on identity. |
 | **enrichment** | The product-enrichment cron's job: fetch a product's pricing page, extract `pricing[]` jsonb via Claude Haiku, mark `enrichment_status = enriched | fetch_failed`. |
 | **parent product** | The `parent_product_id` self-FK on `products` — display grouping only ("4 Google services"). Cancellation policy lives on the leaf, not the parent. |
-| **product** | One row per **product line** in `products` (e.g. YouTube Premium, Google One — not "Google"). Necessary because a user can hold multiple products from one company and `subscriptions` has `UNIQUE (pod_id, product_id)`. |
 | **`resolved_subscription_id`** | The back-pointer from `soundings_log` to the subscription a signal ended up writing or updating. Set after matcher decision. |
 | **subscription** | A row in `subscriptions` — identity + status only (no financial columns). The "what service does this user have" view. |
+
+### Identity layers
+
+Every signal carries four conceptual layers. **Identity** for matching is the tuple `(provider, product, instance)`; **plan** is a mutable attribute that updates in place without forking a new subscription.
+
+| Term | Meaning |
+|---|---|
+| **provider** | The brand/company that bills the user. Examples: GoDaddy, Adobe, Google, Microsoft, Spotify. Strip corporate entity suffixes ("Ltd", "Inc."). Lives on `soundings_log.provider_name` / `provider_domain` and `products.provider_name`. |
+| **product** | The service line within the provider. Examples: `Photoshop` under Adobe, `Google Home` under Google, `Domain Registration` under GoDaddy. Null when the provider IS the product (Spotify, Netflix, Notion, HabitKit). Lives on `soundings_log.product`, `products.name`, `subscriptions.product` (denorm). |
+| **plan** | The tier/plan within the product. Examples: `Family`, `Premium Advanced`, `Business Essentials`. **Mutable** — plan upgrades on the same subscription change this field; they do NOT change provider/product/instance. Lives on `soundings_log.plan_name` (and downstream on cycles). Never participates in identity uniqueness. |
+| **instance** | The immutable per-instance identifier for services billed per-thing-the-user-owns (a domain at a registrar, a worker at Cloudflare, a mailbox at Microsoft 365). Lowercased. Null for services with no per-instance identity. Lives on `soundings_log.instance` and `subscriptions.instance`. |
+| **identity tuple** | `(pod_id, product_id, instance)` — the matcher's uniqueness key on `subscriptions`. Two GoDaddy domains are two subscriptions because they differ on `instance`; a Photoshop user upgrading from Photography to Single App stays one subscription because plan is not in the tuple. |
