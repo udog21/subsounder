@@ -1,6 +1,31 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-22. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+_Last updated: 2026-05-25. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+
+## Product principles
+
+These shape every UX, schema, and feature-scope decision. When in doubt, route the call through them.
+
+### Autonomous-by-default
+
+SubSounder's job is to reduce subscription fatigue, not add to it. The user should be able to ignore the app for weeks and still trust it. When the app asks for input, it's because acting silently was genuinely unsafe — not for rubber-stamping routine cases.
+
+Implications:
+- No per-parse confirmation emails. Weekly digests at most.
+- Curation is optional. Default behavior: silent on routine signals; surface only the cases the user alone can resolve.
+- Configuration is product debt. Right defaults beat user-tunable knobs; reach for a knob only when the correct default genuinely depends on individual preference.
+
+### Visibility → prioritization → active management
+
+The product evolves through three stages. Each unlocks the next.
+
+1. **Visibility** (current): a complete catalog of the user's recurring spend. Surprise-charge avoidance is the immediate utility; the broader goal is awareness — you can't manage what you can't see.
+2. **Prioritization**: with the catalog complete, the user makes tradeoffs (do I need both Disney+ and Netflix?). The app supports this with yearly-spend rollups, default sort by spend, and category grouping.
+3. **Active management**: the app proposes and executes spend changes — cancellation suggestions tied to usage signals, content-drop awareness (return when Andor S2 lands), one-click cancellation via stored cancellation URLs and steps. Each suggestion is reversible and surfaced honestly; the user remains the decision-maker.
+
+A feature that only serves Stage 1 is fine. A feature that contradicts the direction (e.g. permanent reliance on per-event email noise) is not. Phases 0–2 of this roadmap all sit inside Stage 1 (Visibility); Stage 2 work begins after M2.
+
+---
 
 ## How this roadmap works
 
@@ -109,7 +134,7 @@ Not scheduled. Promote into a phase when prioritized.
 - Monetization decision — free / freemium / paid tier
 - Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated; see [competitive-analysis.md](../competitive-analysis.md))
 - Other ingestion channels — CSV import, browser-extension forwarder
-- Bank/card connection (Plaid) — explicitly out of scope; a different product class (competes with Rocket Money)
+- Live bank/card API connection (Plaid/Teller/MX) — explicitly out of scope; a different product class (competes with Rocket Money). One-shot statement (CSV) upload is a separate mechanism, not covered by this exclusion.
 
 ---
 
