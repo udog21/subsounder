@@ -1,6 +1,6 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-25. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+_Last updated: 2026-05-26. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
 
 ## Product principles
 
@@ -49,8 +49,8 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 | Milestone | Event | Target |
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
-| **M0** | Dogfood officially begins | Mon 2026-05-25 |
-| **M1** | Alpha invites go out | Fri–Sat 2026-05-29/30 |
+| **M0** | Dogfood officially begins | Thu 2026-05-28 |
+| **M1** | Alpha invites go out | Fri 2026-06-05 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
 ---
@@ -80,12 +80,11 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup — clear v1-era orphan rows so dogfood starts on a known-clean slate (`techdebt`)
 - [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder that also feeds the LLM eval (sampling non-subscription "randoms" stress-tests the `maybe_subscription` vs `not_subscription` edge); ~1 hour, supportive not gating (`llm`)
 - [#29](https://github.com/udog21/subsounder/issues/29) Parser: skip emails from SubSounder's own domains — code-side defense-in-depth against self-sender loopback (`reliability`)
-- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; new pods unusable without a manual UPDATE (manual workaround in place for current 2nd-account dogfood) (`reliability`)
 - [#55](https://github.com/udog21/subsounder/issues/55) Domain registrar receipts coalesce — prompt doesn't surface the domain name into `plan_name`, so multiple registrations from one merchant collapse into a single subscription (GoDaddy, generalizes to other multi-instance patterns) (`llm`)
 
 **Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 1.
 
-### ◆ M0 — Dogfood officially begins · target Mon 2026-05-25
+### ◆ M0 — Dogfood officially begins · target Thu 2026-05-28
 
 ---
 
@@ -97,10 +96,11 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
 - [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
+- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
 
-**Gate (→ M1):** Sustained — across the dogfood period (~Mon–Fri), zero *glaring* parser misfires in real ongoing use (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
+**Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
 
-### ◆ M1 — Alpha invites go out · target Fri–Sat 2026-05-29/30
+### ◆ M1 — Alpha invites go out · target Fri 2026-06-05
 
 ---
 
