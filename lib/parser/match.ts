@@ -84,12 +84,18 @@ function scoreMatch(signal: ExtractionSignal, existing: ExistingSubscription): n
     }
   }
 
-  if (
-    signal.plan_name &&
-    existing.plan_name &&
-    normalizeName(signal.plan_name) === normalizeName(existing.plan_name)
-  ) {
-    score += 15
+  const signalPlan = normalizeName(signal.plan_name)
+  const existingPlan = normalizeName(existing.plan_name)
+  if (signalPlan && existingPlan) {
+    if (signalPlan === existingPlan) {
+      score += 15
+    } else {
+      score -= 40
+    }
+  } else if (signalPlan && !existingPlan) {
+    // Asymmetric: signal-has-plan vs existing-null is more likely a new instance
+    // (e.g. second domain at a registrar) than enrichment of a bare row.
+    score -= 15
   }
 
   return score

@@ -81,6 +81,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder that also feeds the LLM eval (sampling non-subscription "randoms" stress-tests the `maybe_subscription` vs `not_subscription` edge); ~1 hour, supportive not gating (`llm`)
 - [#29](https://github.com/udog21/subsounder/issues/29) Parser: skip emails from SubSounder's own domains — code-side defense-in-depth against self-sender loopback (`reliability`)
 - [#55](https://github.com/udog21/subsounder/issues/55) Domain registrar receipts coalesce — prompt doesn't surface the domain name into `plan_name`, so multiple registrations from one merchant collapse into a single subscription (GoDaddy, generalizes to other multi-instance patterns) (`llm`)
+- [#60](https://github.com/udog21/subsounder/issues/60) Matcher coalesces across distinct `plan_name`s — `scoreMatch` has no penalty for plan_name mismatch or null-vs-non-null, so the v4 extraction fix from #55 doesn't actually split the catalog until this lands (`reliability`)
 
 **Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 1.
 
