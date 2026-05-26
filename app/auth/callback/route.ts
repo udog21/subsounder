@@ -21,6 +21,10 @@ export async function GET(request: NextRequest) {
 
   if (code) {
     const supabase = await createClient()
+    // Clear any prior session cookies first; without this an already-signed-in
+    // browser keeps the old session instead of switching to the magic link's
+    // account (#65). 'local' scope avoids revoking the prior refresh token.
+    await supabase.auth.signOut({ scope: 'local' })
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
 
     if (exchangeError) {
