@@ -50,7 +50,7 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
 | **M0** | Dogfood officially begins | Thu 2026-05-28 |
-| **M1** | Alpha invites go out | Fri 2026-06-05 |
+| **M1** | Alpha invites go out | Fri 2026-06-12 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
 ---
@@ -100,7 +100,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
 
-### ◆ M1 — Alpha invites go out · target Fri 2026-06-05
+### ◆ M1 — Alpha invites go out · target Fri 2026-06-12
 
 ---
 
