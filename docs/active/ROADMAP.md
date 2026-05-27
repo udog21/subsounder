@@ -103,7 +103,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
 - [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
-- [#TBD-CSV] CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
+- [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to a seeded catalog (CSV backfill working end-to-end) and first forwarded email with no hand-holding.
 
@@ -118,7 +118,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 **Scope — alpha experience:**
 - [#6](https://github.com/udog21/subsounder/issues/6) Edit subscription — minimal field set; doubles as the inline-financial-enrichment affordance for silent-provider welcome emails (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 - [#15](https://github.com/udog21/subsounder/issues/15) Free trial countdown UI on catalog cards (`feature`)
-- [#TBD-PriceTracking] Silent-provider price-change surfacing — when a forwarded price-change email updates `products.pricing`, flag catalog rows holding the old amount as "may be stale" (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
+- [#79](https://github.com/udog21/subsounder/issues/79) Silent-provider price-change surfacing — when a forwarded price-change email updates `products.pricing`, flag catalog rows holding the old amount as "may be stale" (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
 **Scope — M2 prerequisites (built in parallel):**
 - [#16](https://github.com/udog21/subsounder/issues/16) Public self-serve signup — remove invite gating (`feature`)
