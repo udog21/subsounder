@@ -3,13 +3,13 @@
 - **Status:** Accepted
 - **Date:** 2026-05-21
 - **Deciders:** Lek
-- **Related:** [docs/competitive-analysis.md](../competitive-analysis.md), [docs/active/ROADMAP.md](../active/ROADMAP.md)
+- **Related:** [docs/market-and-positioning.md](../market-and-positioning.md), [docs/active/ROADMAP.md](../active/ROADMAP.md)
 
 > **Naming (added 2026-05-21):** The public resource originally called "Subsounder Society" in this ADR is now **Subscription Registry** at `subscriptionregistry.org`. The two operate as independent brands — a neutrally-branded public reference (which signals trust better than a Subsounder sub-brand would) plus the paid app — that can each survive on their own brand and may be linked by cross-promo later. All architectural decisions in this ADR remain in force; later docs use the new name. The filename and in-body references stay as-is for historical accuracy.
 
 ## Context
 
-SubSounder's `products` table holds merchant-side intel: `cancellation_url`, `cancellation_difficulty`, `cancellation_steps`, `pricing`, `aliases`, `parent_product_id`, `enrichment_status`. Per [competitive-analysis.md](../competitive-analysis.md), this dataset is the product's defensible moat, grown along three planned layers:
+SubSounder's `products` table holds merchant-side intel: `cancellation_url`, `cancellation_difficulty`, `cancellation_steps`, `pricing`, `aliases`, `parent_product_id`, `enrichment_status`. As argued in [market-and-positioning.md](../market-and-positioning.md), this dataset is the product's defensible moat. It grows along three planned layers:
 
 1. **Layer 1 — manual seed.** Top providers researched by hand into `seed.sql`.
 2. **Layer 2 — AI scrape.** Background job hits each new merchant's support page and extracts cancellation fields via the LLM.
@@ -80,9 +80,9 @@ App and Society work coexist in this repo until V1; the `subsounder-society` sit
 - **Repo boundary.** Until V1: app-side Society code (export job, signals endpoint, writeback workflow) lives in this repo; Society site code (templates, build, styling, data) lives in `subsounder-society` from the point that repo is created. **After V1**, if Society develops substantial app-independent functionality, app-side Society code can migrate to its own repo too — but the survivability principle is already satisfied at the data-store level, so a code-repo split is a maintenance call, not a structural requirement.
 - **Branch naming.** Standard `<type>/<scope>` in this repo. For Society work, scope segments like `society-export-job` or `society-signals-endpoint` make cross-cutting work visible at a glance.
 - **Cross-project agent context.** When work begins on the `subsounder-society` repo in its own Claude Code session, that session does not automatically see this repo's docs or GH issues. Bridge with:
-  - **Additional working directories.** Configure the Society repo's Claude Code with the app repo as an additional working directory. The Society agent can then read app docs (this ADR, [docs/active/ROADMAP.md](../active/ROADMAP.md), [docs/competitive-analysis.md](../competitive-analysis.md), CLAUDE.md) directly, without WebFetch.
+  - **Additional working directories.** Configure the Society repo's Claude Code with the app repo as an additional working directory. The Society agent can then read app docs (this ADR, [docs/active/ROADMAP.md](../active/ROADMAP.md), [docs/market-and-positioning.md](../market-and-positioning.md), CLAUDE.md) directly, without WebFetch.
   - **Cross-repo GH issues.** Use `gh issue list --repo udog21/subsounder ...` (and `view`/`create` variants) when the Society agent needs to reference or track work in the app repo. Society's CLAUDE.md should call out this pattern explicitly so agents don't assume single-repo scope.
-  - **Canonical reading list.** Society's own CLAUDE.md should pin the app docs every Society agent should consult first: this ADR (the boundary contract), the app's `docs/active/ROADMAP.md` (milestone context), and `docs/competitive-analysis.md` (cancellation-intel framing).
+  - **Canonical reading list.** Society's own CLAUDE.md should pin the app docs every Society agent should consult first: this ADR (the boundary contract), the app's `docs/active/ROADMAP.md` (milestone context), and `docs/market-and-positioning.md` (positioning + cancellation-intel moat framing).
   - **Direction.** The app generally does not need to read Society's repo during routine work; the export job is one-directional and the app's `products` table is its own source of truth. Wire the additional-directory bridge in only the direction needed.
 
 ## Consequences

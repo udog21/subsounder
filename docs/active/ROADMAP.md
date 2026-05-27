@@ -96,15 +96,16 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ## Phase 1 — Dogfood
 
-**Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need.
+**Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need — including the CSV onboarding backfill that lets alpha invitees seed silent-provider subs (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)).
 
 **Scope:**
 - [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
 - [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
 - [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
+- [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
-**Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to first forwarded email with no hand-holding.
+**Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to a seeded catalog (CSV backfill working end-to-end) and first forwarded email with no hand-holding.
 
 ### ◆ M1 — Alpha invites go out · target Fri 2026-06-12
 
@@ -115,8 +116,9 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 **Goal:** Prove the funnel works on strangers' real inboxes before spending a cent on ads — and build M2's prerequisites in parallel.
 
 **Scope — alpha experience:**
-- [#6](https://github.com/udog21/subsounder/issues/6) Edit subscription — minimal field set (`feature`)
+- [#6](https://github.com/udog21/subsounder/issues/6) Edit subscription — minimal field set; doubles as the inline-financial-enrichment affordance for silent-provider welcome emails (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 - [#15](https://github.com/udog21/subsounder/issues/15) Free trial countdown UI on catalog cards (`feature`)
+- [#79](https://github.com/udog21/subsounder/issues/79) Silent-provider price-change surfacing — when a forwarded price-change email updates `products.pricing`, flag catalog rows holding the old amount as "may be stale" (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
 **Scope — M2 prerequisites (built in parallel):**
 - [#16](https://github.com/udog21/subsounder/issues/16) Public self-serve signup — remove invite gating (`feature`)
@@ -140,8 +142,8 @@ Not scheduled. Promote into a phase when prioritized.
 - [#23](https://github.com/udog21/subsounder/issues/23) Family / pod sharing (`feature`)
 - Scale paid spend — ramp daily budget as unit economics hold
 - Monetization decision — free / freemium / paid tier
-- Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated; see [competitive-analysis.md](../competitive-analysis.md))
-- Other ingestion channels — CSV import, browser-extension forwarder
+- Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated)
+- Browser-extension forwarder — catch welcome flows at point-of-subscribe
 - Live bank/card API connection (Plaid/Teller/MX) — explicitly out of scope; a different product class (competes with Rocket Money). One-shot statement (CSV) upload is a separate mechanism, not covered by this exclusion.
 
 ---

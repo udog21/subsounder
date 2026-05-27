@@ -4,21 +4,6 @@ _Pending product decisions that the codebase needs answered. Each question stays
 
 ---
 
-## Product scope
-
-### Q: What recurring services is this app for?
-
-**Status:** Open
-**Context:** "SubSounder" parses subscription emails. That naturally fits digital/SaaS subscriptions and service subscriptions that send receipts. It does not naturally fit HOA fees, condo dues, leases, utilities, car insurance — these usually auto-debit silently or send paper bills. The product positioning, marketing copy, and what we tell users to forward all depend on this answer.
-**Options:**
-- **Digital + service subscriptions that email receipts** (Spotify, Netflix, Adobe, gym memberships, magazine subs, app subs via Apple/Google Play). Natural fit for email parsing. Recommended.
-- **All recurring expenses including auto-debited bills.** Would require Plaid or bank-connection integration. Different product class — competes with Rocket Money. Much bigger lift.
-- **Email-only but explicitly only "digital" stuff** (no physical service subs). Narrower than option 1.
-**Recommendation:** Option 1 — "track every recurring service that emails you a receipt." Use bank integration only if a future milestone needs it.
-**Decision:** _(pending)_
-
----
-
 ## Data model & temporal state
 
 ### Q: Out-of-order receipts for the same subscription

@@ -26,7 +26,7 @@ Standing context about how the system is built. Less churn than planning docs; u
 |---|---|
 | [architecture.md](architecture.md) | Non-obvious design choices and why they exist. |
 | [how-it-runs.md](how-it-runs.md) | Plain-English walkthrough of the product loop from forwarded email to renewal reminder. |
-| [competitive-analysis.md](competitive-analysis.md) | Market landscape and SubSounder's positioning. |
+| [market-and-positioning.md](market-and-positioning.md) | Who SubSounder is for, the segment hypothesis being tested, competitive landscape, and the structural differentiation argument. Supersedes the former `competitive-analysis.md`. |
 | [adr/](adr/) | Architecture Decision Records — preserved log of decisions worth remembering. New decisions get a new numbered file. |
 
 ## Archive
