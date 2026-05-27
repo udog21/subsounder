@@ -91,16 +91,19 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 **Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need — including the CSV onboarding backfill that lets alpha invitees seed silent-provider subs (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)).
 
-**Scope:**
-- [#4](https://github.com/udog21/subsounder/issues/4) Dismiss action — kebab menu, `deleted_by_user` status, matcher skip, "show dismissed" toggle (`feature`)
+**Scope** (open only; #4 Dismiss shipped during dogfood, will be summarized in `What landed` when M1 is reached):
 - [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
+- [#46](https://github.com/udog21/subsounder/issues/46) Replace Needs Review window with confirmed/unconfirmed state on catalog rows — trust signal for CSV-seeded vs. email-confirmed rows (pairs with #78) (`feature`)
 - [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
+- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — add FAQ + onboarding hint so Outlook-using alpha invitees aren't silently dead-ended (`feature`)
+- [#72](https://github.com/udog21/subsounder/issues/72) Matcher creates duplicate identity on `trial_start` → `renewal_notice` — alpha invitees who try a free trial then convert would hit duplicate rows without this (`reliability`)
+- [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar receipts: `billing_cadence` not inferred from 1-year date gap — known recurring misfire on GoDaddy-class subs (`llm`)
 - [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to a seeded catalog (CSV backfill working end-to-end) and first forwarded email with no hand-holding.
 
-### ◆ M1 — Alpha invites go out · target Fri 2026-06-12
+### ◆ M1 — Alpha invites go out · target Mon 2026-07-05
 
 ---
 
