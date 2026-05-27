@@ -1,6 +1,6 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-26. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+_Last updated: 2026-05-27. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
 
 ## Product principles
 
@@ -49,7 +49,7 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 | Milestone | Event | Target |
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
-| **M0** | Dogfood officially begins | Thu 2026-05-28 |
+| **M0** | Dogfood officially begins | Mon 2026-06-01 |
 | **M1** | Alpha invites go out | Fri 2026-06-12 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
@@ -82,10 +82,15 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#29](https://github.com/udog21/subsounder/issues/29) Parser: skip emails from SubSounder's own domains — code-side defense-in-depth against self-sender loopback (`reliability`)
 - [#55](https://github.com/udog21/subsounder/issues/55) Domain registrar receipts coalesce — prompt doesn't surface the domain name into `plan_name`, so multiple registrations from one merchant collapse into a single subscription (GoDaddy, generalizes to other multi-instance patterns) (`llm`)
 - [#60](https://github.com/udog21/subsounder/issues/60) Matcher: coalesces signals across distinct `plan_name`s — no penalty for plan/product mismatch or null-vs-non-null, so receipts for two different products from one provider collide; pairs with #55 on the matcher side (`reliability`)
+- [#68](https://github.com/udog21/subsounder/issues/68) Loopback skip-filter over-blocks legitimate Gmail-filter auto-forwards — `from_email`-based discriminator silently drops any auto-forwarded mail; needs to become content-based (header or subject-prefix) so #25 actually delivers value (`reliability`)
+- [#69](https://github.com/udog21/subsounder/issues/69) Promo/marketing email classified as `trial_start` — Audible "Last Chance" offer created a false trial subscription; prompt needs an explicit offer-vs-confirmation distinction (`llm`)
+- [#70](https://github.com/udog21/subsounder/issues/70) One-time Apple Movie Rentals inserted as subscription rows — extractor + matcher both let one-shot purchases through with null cadence and null next_renewal_at; prompt fix + matcher guard (`llm`)
+- [#71](https://github.com/udog21/subsounder/issues/71) `cancel_by_at` left stale when cycle `next_renewal_at` is rolled forward — out-of-order receipts produce a future renewal date paired with a past cancel-by, generating false "cancel by yesterday!" UI urgency (`reliability`)
+- [#75](https://github.com/udog21/subsounder/issues/75) Renewal notices without amount line leave subscription amount NULL — providers commonly omit the renewal price in renewal-warning emails; matcher should carry the previous cycle's amount forward so catalog doesn't show "$?/yr" (`llm`)
 
-**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual SQL cleanup of stragglers is acceptable here — UI dismissal lands in Phase 1.
+**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual cleanup of stragglers via the catalog Remove affordance is acceptable here — broader UI dismissal lands in Phase 1.
 
-### ◆ M0 — Dogfood officially begins · target Thu 2026-05-28
+### ◆ M0 — Dogfood officially begins · target Mon 2026-06-01
 
 ---
 
