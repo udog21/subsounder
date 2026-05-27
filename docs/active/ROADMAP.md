@@ -74,14 +74,7 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 **Goal:** Make the data layer (parser + matcher + dedupe) accurate enough on Lek's real receipts that he's willing to live in the catalog daily. UI affordances for managing imperfect data (Dismiss, etc.) ship in Phase 1.
 
-**Scope:**
-- [#3](https://github.com/udog21/subsounder/issues/3) Prompt v3 — trial fields, cadence-vs-date consistency, date grounding (`llm`)
-- [#7](https://github.com/udog21/subsounder/issues/7) Out-of-order receipts — an older signal must not overwrite newer subscription state (`reliability`)
-- [#9](https://github.com/udog21/subsounder/issues/9) Test-account orphan cleanup — clear v1-era orphan rows so dogfood starts on a known-clean slate (`techdebt`)
-- [#25](https://github.com/udog21/subsounder/issues/25) Gmail filter → auto-forward subscription emails to alias — zero-code dogfood seeder that also feeds the LLM eval (sampling non-subscription "randoms" stress-tests the `maybe_subscription` vs `not_subscription` edge); ~1 hour, supportive not gating (`llm`)
-- [#29](https://github.com/udog21/subsounder/issues/29) Parser: skip emails from SubSounder's own domains — code-side defense-in-depth against self-sender loopback (`reliability`)
-- [#55](https://github.com/udog21/subsounder/issues/55) Domain registrar receipts coalesce — prompt doesn't surface the domain name into `plan_name`, so multiple registrations from one merchant collapse into a single subscription (GoDaddy, generalizes to other multi-instance patterns) (`llm`)
-- [#60](https://github.com/udog21/subsounder/issues/60) Matcher: coalesces signals across distinct `plan_name`s — no penalty for plan/product mismatch or null-vs-non-null, so receipts for two different products from one provider collide; pairs with #55 on the matcher side (`reliability`)
+**Scope** (open only — closed entries from this phase will be summarized in a `What landed` block when M0 is reached, per the doc convention):
 - [#68](https://github.com/udog21/subsounder/issues/68) Loopback skip-filter over-blocks legitimate Gmail-filter auto-forwards — `from_email`-based discriminator silently drops any auto-forwarded mail; needs to become content-based (header or subject-prefix) so #25 actually delivers value (`reliability`)
 - [#69](https://github.com/udog21/subsounder/issues/69) Promo/marketing email classified as `trial_start` — Audible "Last Chance" offer created a false trial subscription; prompt needs an explicit offer-vs-confirmation distinction (`llm`)
 - [#70](https://github.com/udog21/subsounder/issues/70) One-time Apple Movie Rentals inserted as subscription rows — extractor + matcher both let one-shot purchases through with null cadence and null next_renewal_at; prompt fix + matcher guard (`llm`)
