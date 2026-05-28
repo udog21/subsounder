@@ -102,7 +102,6 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 - [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`llm`)
 - [#90](https://github.com/udog21/subsounder/issues/90) Seed top ~30 wedge-provider cancellation data — `cancellation_url` / `cancellation_difficulty` / `cancellation_steps` in `seed.sql` for the modern-stack provider set, so alpha catalogs surface actionable cancellation info on day one (`feature`)
 - [#91](https://github.com/udog21/subsounder/issues/91) MVP LLM eval fixture harness — sanitized wedge-receipt corpus + prompt-diff script for catching extraction regressions during active prompt iteration (`llm`)
-- [#92](https://github.com/udog21/subsounder/issues/92) Admin-only pod reset route — tight test loop for the onboarding flow (#54 / #8) so Lek can re-onboard from scratch before alpha invitees hit it (`techdebt`)
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires on Lek's stack (subtle ones filed); catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup → alias generation → first forwarded email → first parsed subscription in the catalog, with no hand-holding.
 
