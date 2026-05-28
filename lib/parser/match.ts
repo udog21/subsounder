@@ -205,30 +205,40 @@ function advanceByCadence(iso: string, cadence: string): string {
 // receipt whose stated next_renewal_at is already in the past (the email was
 // forwarded weeks or months after the renewal occurred), project forward by
 // cadence so the catalog shows a current cycle, not a stale historical one.
-function reconcileNextRenewal(
+// #71: cancel_by_at must roll forward in lockstep — leaving it at the original
+// (now-past) date produces false "cancel by yesterday!" UI urgency.
+function reconcileCycleDates(
   next_renewal_at: string | null,
+  cancel_by_at: string | null,
   cadence: string | null,
-): string | null {
-  if (!next_renewal_at || !cadence) return next_renewal_at
-  if (cadence === 'one_time') return next_renewal_at
+): { next_renewal_at: string | null; cancel_by_at: string | null } {
+  if (!next_renewal_at || !cadence) return { next_renewal_at, cancel_by_at }
+  if (cadence === 'one_time') return { next_renewal_at, cancel_by_at }
   const now = Date.now()
-  let current = next_renewal_at
+  let renewal = next_renewal_at
+  let cancel = cancel_by_at
   for (let i = 0; i < 60; i++) {
-    if (new Date(current).getTime() > now) return current
-    current = advanceByCadence(current, cadence)
+    if (new Date(renewal).getTime() > now) return { next_renewal_at: renewal, cancel_by_at: cancel }
+    renewal = advanceByCadence(renewal, cadence)
+    if (cancel) cancel = advanceByCadence(cancel, cadence)
   }
-  return current
+  return { next_renewal_at: renewal, cancel_by_at: cancel }
 }
 
 function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
+  const reconciled = reconcileCycleDates(
+    signal.next_renewal_at,
+    signal.cancel_by_at,
+    signal.billing_cadence,
+  )
   return {
     signal_type: signal.signal_type,
     amount: signal.signal_type === 'trial_start' ? 0 : signal.amount,
     currency: signal.currency,
     billing_cadence: signal.billing_cadence,
     period_start: signal.event_date,
-    next_renewal_at: reconcileNextRenewal(signal.next_renewal_at, signal.billing_cadence),
-    cancel_by_at: signal.cancel_by_at,
+    next_renewal_at: reconciled.next_renewal_at,
+    cancel_by_at: reconciled.cancel_by_at,
   }
 }
 
