@@ -165,7 +165,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       supabase
         .from('subscriptions')
         .select(
-          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, product, plan_name, instance, last_observed_content_date, status',
+          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, product, plan_name, instance, last_observed_content_date, status, current_cycle_id',
         )
         .eq('pod_id', pod_id)
         .eq('deleted_by_user', false),
@@ -224,6 +224,30 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       const matchResult = match(signal, subs, pod_id, {
         classification: valid.classification,
       })
+
+      // #75 amount/currency carry-forward. Renewal-warning emails routinely omit
+      // the renewal price ("Your subscription renews on …" with no $ figure).
+      // When the matcher updates an existing sub and the signal has no amount,
+      // inherit it from that sub's current cycle so the catalog doesn't show
+      // "$?/yr" once we already know the price.
+      if (
+        matchResult.action === 'update' &&
+        matchResult.matched_id &&
+        matchResult.cyclePayload.amount == null
+      ) {
+        const matchedSub = subs.find((s) => s.id === matchResult.matched_id)
+        if (matchedSub?.current_cycle_id) {
+          const { data: priorCycle } = await supabase
+            .from('subscription_cycles')
+            .select('amount, currency')
+            .eq('id', matchedSub.current_cycle_id)
+            .maybeSingle()
+          if (priorCycle?.amount != null) {
+            matchResult.cyclePayload.amount = priorCycle.amount
+            matchResult.cyclePayload.currency = priorCycle.currency ?? matchResult.cyclePayload.currency
+          }
+        }
+      }
 
       let productId: string | null = null
       let cancellationUrl: string | null = null
@@ -300,6 +324,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
             instance: matchResult.subscriptionPayload.instance,
             last_observed_content_date: matchResult.subscriptionPayload.last_observed_content_date,
             status: matchResult.subscriptionPayload.status,
+            current_cycle_id: null,
           })
         }
       } else if (matchResult.action === 'update' && matchResult.matched_id) {

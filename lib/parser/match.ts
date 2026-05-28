@@ -12,6 +12,7 @@ export interface ExistingSubscription {
   instance: string | null
   last_observed_content_date: string | null
   status: string
+  current_cycle_id: string | null
 }
 
 export interface SubscriptionUpsert {
