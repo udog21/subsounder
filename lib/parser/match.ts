@@ -12,6 +12,7 @@ export interface ExistingSubscription {
   instance: string | null
   last_observed_content_date: string | null
   status: string
+  current_cycle_id: string | null
 }
 
 export interface SubscriptionUpsert {
@@ -205,37 +206,52 @@ function advanceByCadence(iso: string, cadence: string): string {
 // receipt whose stated next_renewal_at is already in the past (the email was
 // forwarded weeks or months after the renewal occurred), project forward by
 // cadence so the catalog shows a current cycle, not a stale historical one.
-function reconcileNextRenewal(
+// #71: cancel_by_at must roll forward in lockstep — leaving it at the original
+// (now-past) date produces false "cancel by yesterday!" UI urgency.
+function reconcileCycleDates(
   next_renewal_at: string | null,
+  cancel_by_at: string | null,
   cadence: string | null,
-): string | null {
-  if (!next_renewal_at || !cadence) return next_renewal_at
-  if (cadence === 'one_time') return next_renewal_at
+): { next_renewal_at: string | null; cancel_by_at: string | null } {
+  if (!next_renewal_at || !cadence) return { next_renewal_at, cancel_by_at }
+  if (cadence === 'one_time') return { next_renewal_at, cancel_by_at }
   const now = Date.now()
-  let current = next_renewal_at
+  let renewal = next_renewal_at
+  let cancel = cancel_by_at
   for (let i = 0; i < 60; i++) {
-    if (new Date(current).getTime() > now) return current
-    current = advanceByCadence(current, cadence)
+    if (new Date(renewal).getTime() > now) return { next_renewal_at: renewal, cancel_by_at: cancel }
+    renewal = advanceByCadence(renewal, cadence)
+    if (cancel) cancel = advanceByCadence(cancel, cadence)
   }
-  return current
+  return { next_renewal_at: renewal, cancel_by_at: cancel }
 }
 
 function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
+  const reconciled = reconcileCycleDates(
+    signal.next_renewal_at,
+    signal.cancel_by_at,
+    signal.billing_cadence,
+  )
   return {
     signal_type: signal.signal_type,
     amount: signal.signal_type === 'trial_start' ? 0 : signal.amount,
     currency: signal.currency,
     billing_cadence: signal.billing_cadence,
     period_start: signal.event_date,
-    next_renewal_at: reconcileNextRenewal(signal.next_renewal_at, signal.billing_cadence),
-    cancel_by_at: signal.cancel_by_at,
+    next_renewal_at: reconciled.next_renewal_at,
+    cancel_by_at: reconciled.cancel_by_at,
   }
+}
+
+export interface MatchOptions {
+  classification?: 'subscription' | 'maybe_subscription' | 'not_subscription' | 'spam'
 }
 
 export function match(
   signal: ExtractionSignal,
   existingSubscriptions: ExistingSubscription[],
   podId: string,
+  options: MatchOptions = {},
 ): MatchResult {
   let bestScore = 0
   let bestMatch: ExistingSubscription | null = null
@@ -257,6 +273,19 @@ export function match(
       subscriptionPayload: buildUpdateSubscriptionPayload(signal, bestMatch, podId),
       cyclePayload,
     }
+  }
+
+  // #70 one-shot transaction guard. A `receipt` signal with no cadence AND no
+  // next_renewal_at is the structural fingerprint of a one-time purchase
+  // (Apple Movie Rental, in-app purchase, hardware order). Block the insert
+  // unless the classifier was confident this was a subscription. `charge` has
+  // the same shape and is a candidate for the same guard if misfires appear.
+  const isOneShotShape =
+    signal.signal_type === 'receipt' &&
+    signal.billing_cadence == null &&
+    signal.next_renewal_at == null
+  if (isOneShotShape && options.classification !== 'subscription') {
+    return { action: 'skip', subscriptionPayload: buildSubscriptionPayload(signal, podId), cyclePayload }
   }
 
   return { action: 'insert', subscriptionPayload: buildSubscriptionPayload(signal, podId), cyclePayload }

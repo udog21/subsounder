@@ -40,6 +40,27 @@ function getToLocalpart(email: string | undefined): string | undefined {
   return email.slice(0, at).toLowerCase()
 }
 
+// Mailgun delivers all original message headers in a `message-headers` form
+// field as a JSON-encoded array of [name, value] tuples. Custom X-headers
+// (including the X-Subsounder-Notification stamp on outbound mail) are only
+// reliably reachable here — they aren't promoted to top-level form fields.
+function hasSubsounderNotificationHeader(messageHeadersJson: string | undefined): boolean {
+  if (!messageHeadersJson) return false
+  try {
+    const headers = JSON.parse(messageHeadersJson) as unknown
+    if (!Array.isArray(headers)) return false
+    return headers.some(
+      (entry) =>
+        Array.isArray(entry) &&
+        typeof entry[0] === 'string' &&
+        entry[0].toLowerCase() === 'x-subsounder-notification' &&
+        String(entry[1]) === '1',
+    )
+  } catch {
+    return false
+  }
+}
+
 function safeIsoFromUnix(timestamp: string | undefined): string | undefined {
   if (!timestamp) return undefined
   const num = Number(timestamp)
@@ -129,6 +150,9 @@ export async function POST(req: NextRequest) {
     const bodyText = toString(body['body-plain']) || toString(body['stripped-text']) || ''
     const bodyHtml = toString(body['body-html']) || toString(body['stripped-html']) || ''
 
+    const messageHeadersJson = toString(body['message-headers'])
+    const isSubsounderNotification = hasSubsounderNotificationHeader(messageHeadersJson)
+
     // Fix 3: write full timestamptz ISO string, not date-only
     const headerDate = toString(body.Date) || toString(body.date)
     let contentDate: string | null = null
@@ -178,6 +202,7 @@ export async function POST(req: NextRequest) {
           From: fromRaw ?? null,
           To: recipientRaw ?? null,
         },
+        is_subsounder_notification: isSubsounderNotification,
       },
     }
 

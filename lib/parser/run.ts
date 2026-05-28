@@ -57,11 +57,21 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       return { status: 'skipped', reason: 'already_processed' }
     }
 
-    // Gmail's auto-forwarder rewrites From: to e.g. `inbound.subsounder.com@gmail.com`
-    // — the original recipient lives in the localpart, not the domain. Substring-match
-    // on from_email catches that loopback (see #29).
-    const fromEmail = (receipt.from_email ?? '').toLowerCase()
-    if (fromEmail.includes('subsounder.com')) {
+    // Loopback skip (#29, refined in #68). The substring-on-from_email check
+    // we used to do here also swallowed legitimate Gmail-filter auto-forwards
+    // because Gmail rewrites From: to `inbound.subsounder.com@gmail.com` — any
+    // auto-forwarded third-party email landed in that bucket. Two stricter
+    // signals replace it:
+    //   1. X-Subsounder-Notification: 1 — every outbound notification carries
+    //      this header (lib/email/index.ts); the inbound webhook parses
+    //      message-headers and stamps is_subsounder_notification in raw_payload.
+    //   2. from_domain === 'subsounder.com' — strict domain match, catches
+    //      direct loopback. Never matches Gmail's rewrite (which lives in
+    //      gmail.com).
+    const rawPayload = receipt.raw_payload as { is_subsounder_notification?: boolean } | null
+    const isSubsounderNotification = rawPayload?.is_subsounder_notification === true
+    const isDirectLoopback = (receipt.from_domain ?? '').toLowerCase() === 'subsounder.com'
+    if (isSubsounderNotification || isDirectLoopback) {
       await supabase
         .from('inbound_receipts')
         .update({
@@ -165,7 +175,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       supabase
         .from('subscriptions')
         .select(
-          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, product, plan_name, instance, last_observed_content_date, status',
+          'id, provider_name, provider_domain, billed_by_name, billed_by_domain, display_name, product, plan_name, instance, last_observed_content_date, status, current_cycle_id',
         )
         .eq('pod_id', pod_id)
         .eq('deleted_by_user', false),
@@ -221,7 +231,33 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       if (!sounding) continue
       soundingsWritten++
 
-      const matchResult = match(signal, subs, pod_id)
+      const matchResult = match(signal, subs, pod_id, {
+        classification: valid.classification,
+      })
+
+      // #75 amount/currency carry-forward. Renewal-warning emails routinely omit
+      // the renewal price ("Your subscription renews on …" with no $ figure).
+      // When the matcher updates an existing sub and the signal has no amount,
+      // inherit it from that sub's current cycle so the catalog doesn't show
+      // "$?/yr" once we already know the price.
+      if (
+        matchResult.action === 'update' &&
+        matchResult.matched_id &&
+        matchResult.cyclePayload.amount == null
+      ) {
+        const matchedSub = subs.find((s) => s.id === matchResult.matched_id)
+        if (matchedSub?.current_cycle_id) {
+          const { data: priorCycle } = await supabase
+            .from('subscription_cycles')
+            .select('amount, currency')
+            .eq('id', matchedSub.current_cycle_id)
+            .maybeSingle()
+          if (priorCycle?.amount != null) {
+            matchResult.cyclePayload.amount = priorCycle.amount
+            matchResult.cyclePayload.currency = priorCycle.currency ?? matchResult.cyclePayload.currency
+          }
+        }
+      }
 
       let productId: string | null = null
       let cancellationUrl: string | null = null
@@ -298,6 +334,7 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
             instance: matchResult.subscriptionPayload.instance,
             last_observed_content_date: matchResult.subscriptionPayload.last_observed_content_date,
             status: matchResult.subscriptionPayload.status,
+            current_cycle_id: null,
           })
         }
       } else if (matchResult.action === 'update' && matchResult.matched_id) {
