@@ -43,7 +43,16 @@ async function send(to: string, subject: string, text: string): Promise<void> {
     throw new Error('MAILGUN_API_KEY not configured')
   }
 
-  const body = new URLSearchParams({ from: FROM, to, subject, text })
+  // Stamp every outbound notification so the inbound parser can recognize a
+  // loopback regardless of how forwarding rewrites From: (Gmail's auto-
+  // forwarder produces `inbound.subsounder.com@gmail.com`, etc.). See #68.
+  const body = new URLSearchParams({
+    from: FROM,
+    to,
+    subject,
+    text,
+    'h:X-Subsounder-Notification': '1',
+  })
 
   const res = await fetch(`${MAILGUN_API_BASE}/${SENDING_DOMAIN}/messages`, {
     method: 'POST',

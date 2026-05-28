@@ -57,11 +57,21 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       return { status: 'skipped', reason: 'already_processed' }
     }
 
-    // Gmail's auto-forwarder rewrites From: to e.g. `inbound.subsounder.com@gmail.com`
-    // — the original recipient lives in the localpart, not the domain. Substring-match
-    // on from_email catches that loopback (see #29).
-    const fromEmail = (receipt.from_email ?? '').toLowerCase()
-    if (fromEmail.includes('subsounder.com')) {
+    // Loopback skip (#29, refined in #68). The substring-on-from_email check
+    // we used to do here also swallowed legitimate Gmail-filter auto-forwards
+    // because Gmail rewrites From: to `inbound.subsounder.com@gmail.com` — any
+    // auto-forwarded third-party email landed in that bucket. Two stricter
+    // signals replace it:
+    //   1. X-Subsounder-Notification: 1 — every outbound notification carries
+    //      this header (lib/email/index.ts); the inbound webhook parses
+    //      message-headers and stamps is_subsounder_notification in raw_payload.
+    //   2. from_domain === 'subsounder.com' — strict domain match, catches
+    //      direct loopback. Never matches Gmail's rewrite (which lives in
+    //      gmail.com).
+    const rawPayload = receipt.raw_payload as { is_subsounder_notification?: boolean } | null
+    const isSubsounderNotification = rawPayload?.is_subsounder_notification === true
+    const isDirectLoopback = (receipt.from_domain ?? '').toLowerCase() === 'subsounder.com'
+    if (isSubsounderNotification || isDirectLoopback) {
       await supabase
         .from('inbound_receipts')
         .update({
