@@ -49,7 +49,7 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 | Milestone | Event | Target |
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
-| **M0** | Dogfood officially begins | Mon 2026-06-01 |
+| **M0** | Dogfood officially begins | ✅ 2026-05-28 |
 | **M1** | Alpha invites go out | Fri 2026-06-12 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
@@ -70,24 +70,23 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 
 ---
 
-## Phase 0 — Harden for personal use · *current*
+## Phase 0 — Harden for personal use — ✅ reached 2026-05-28
 
-**Goal:** Make the data layer (parser + matcher + dedupe) accurate enough on Lek's real receipts that he's willing to live in the catalog daily. UI affordances for managing imperfect data (Dismiss, etc.) ship in Phase 1.
+What landed:
+- 2026-05-27 burndown — promo-vs-confirmation classification (#69), Apple one-time line items rejected at prompt + matcher (#70), `cancel_by_at` rolled in lockstep with `next_renewal_at` (#71), amount carry-forward on `renewal_notice` (#75), content-based loopback skip via `X-Subsounder-Notification` header (#68 — unblocks the Gmail auto-forward seeder)
+- Matcher correctness — out-of-order receipt reconciliation with cycle-promotion guard (#7), distinct-plan penalty with null-asymmetric scoring (#60), 4-layer identity (provider / product / plan / instance) eliminates multi-instance coalescing on registrars and per-mailbox SaaS (#55)
+- Prompt v3 → v6 — trial fields, cadence-vs-date authority, today-date grounding, bundled-aggregator splitting, 4-layer identity, promo-vs-confirmation distinction, Apple one-time guard
+- Dogfood ingestion — Gmail filter auto-forward seeder (#25), defense-in-depth skip for SubSounder's own outbound (#29)
+- Auth + onboarding fixes — magic-link session hang (#52), session-switch bug on multi-account login (#65)
+- Test-account cleanup (#9)
 
-**Scope** (open only — closed entries from this phase will be summarized in a `What landed` block when M0 is reached, per the doc convention):
-- [#68](https://github.com/udog21/subsounder/issues/68) Loopback skip-filter over-blocks legitimate Gmail-filter auto-forwards — `from_email`-based discriminator silently drops any auto-forwarded mail; needs to become content-based (header or subject-prefix) so #25 actually delivers value (`reliability`)
-- [#69](https://github.com/udog21/subsounder/issues/69) Promo/marketing email classified as `trial_start` — Audible "Last Chance" offer created a false trial subscription; prompt needs an explicit offer-vs-confirmation distinction (`llm`)
-- [#70](https://github.com/udog21/subsounder/issues/70) One-time Apple Movie Rentals inserted as subscription rows — extractor + matcher both let one-shot purchases through with null cadence and null next_renewal_at; prompt fix + matcher guard (`llm`)
-- [#71](https://github.com/udog21/subsounder/issues/71) `cancel_by_at` left stale when cycle `next_renewal_at` is rolled forward — out-of-order receipts produce a future renewal date paired with a past cancel-by, generating false "cancel by yesterday!" UI urgency (`reliability`)
-- [#75](https://github.com/udog21/subsounder/issues/75) Renewal notices without amount line leave subscription amount NULL — providers commonly omit the renewal price in renewal-warning emails; matcher should carry the previous cycle's amount forward so catalog doesn't show "$?/yr" (`llm`)
+Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, iCloud, Dumb Phone), Skillshare (with amount carry-forward), Google Home Premium Advanced (with dates rolled), GoDaddy multi-instance domains, Microsoft 365 mailboxes, Samsung Art Store, SailFlow, EMI Health, plus correctly rejected non-subs (Audible promo, Apple Movie Rentals, multiple marketing offers). Glaring misfires in the active catalog at gate time: 0.
 
-**Gate (→ M0):** After Lek forwards ≥10 of his real subscription receipts (covering his ≥12 active subs), the resulting catalog matches reality on the vast majority of rows; any misfire is subtle (not glaring) and filed as a GH issue. Manual cleanup of stragglers via the catalog Remove affordance is acceptable here — broader UI dismissal lands in Phase 1.
-
-### ◆ M0 — Dogfood officially begins · target Mon 2026-06-01
+### ◆ M0 — Dogfood officially begins · ✅ 2026-05-28
 
 ---
 
-## Phase 1 — Dogfood
+## Phase 1 — Dogfood · *current*
 
 **Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need — including the CSV onboarding backfill that lets alpha invitees seed silent-provider subs (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)).
 
