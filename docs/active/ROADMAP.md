@@ -90,18 +90,33 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 
 **Goal:** Ship the full user lifecycle UI — onboarding (alias generation, welcome email, empty-state flow), catalog seeding via email forwarding (no statement CSV upload required during dogfood), signal parsing, promotion to catalog, and curation/pruning. Lek lives in the product as a real daily user, and a brand-new wedge invitee (modern software stack operator — see [market-and-positioning.md](../market-and-positioning.md)) can onboard cleanly with forwarding alone. Silent-provider CSV seeding moves to Phase 2 where alpha feedback tests whether it's needed for day-1 value.
 
-**Scope** (open only; #4 Dismiss shipped during dogfood, will be summarized in `What landed` when M1 is reached):
-- [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
+**Scope** — three themes, each a sub-goal of the Phase 1 goal above. #4 Dismiss shipped during dogfood; will be summarized in `What landed` when M1 is reached.
+
+### Onboarding the first new user
+
+*A brand-new wedge invitee goes from signup → alias → first forwarded email → useful catalog with no hand-holding.*
+
+- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — fix `create_pod_and_profile` RPC so net-new signups get a pod alias (every alpha invitee hits this on day one) (`reliability`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email — copy reframed for the wedge ICP (`feature`)
-- [#46](https://github.com/udog21/subsounder/issues/46) Replace Needs Review window with confirmed/unconfirmed state on catalog rows — the catalog-card surface for ADR-0004 Class A/B confidence (pairs with #83/#84) (`feature`)
-- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
-- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — add FAQ + onboarding hint so Outlook-using alpha invitees aren't silently dead-ended (`feature`)
-- [#72](https://github.com/udog21/subsounder/issues/72) Matcher creates duplicate identity on `trial_start` → `renewal_notice` — alpha invitees who try a free trial then convert would hit duplicate rows without this (`reliability`)
-- [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar receipts: `billing_cadence` not inferred from 1-year date gap — known recurring misfire on GoDaddy-class subs (`llm`)
-- [#83](https://github.com/udog21/subsounder/issues/83) Sonar pings bench — Class C provider pills above catalog with dismiss + promote-to-card actions; surfaces incomplete signals when an alpha invitee backfills via forwarding and earlier receipts land partial (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`feature`)
-- [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`llm`)
-- [#90](https://github.com/udog21/subsounder/issues/90) Seed top ~30 wedge-provider cancellation data — `cancellation_url` / `cancellation_difficulty` / `cancellation_steps` in `seed.sql` for the modern-stack provider set, so alpha catalogs surface actionable cancellation info on day one (`feature`)
-- [#91](https://github.com/udog21/subsounder/issues/91) MVP LLM eval fixture harness — sanitized wedge-receipt corpus + prompt-diff script for catching extraction regressions during active prompt iteration (`llm`)
+- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — FAQ + onboarding hint so Outlook-using invitees aren't silently dead-ended (`feature`)
+- [#90](https://github.com/udog21/subsounder/issues/90) Seed top ~30 wedge-provider cancellation data — actionable cancellation info on day-one catalog rows (`feature`)
+
+### Catalog quality + parser correctness
+
+*Lek lives in the catalog daily without it degrading; the parser handles the wedge stack's known misfires; future prompt iterations are caught by a regression harness.*
+
+- [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action — manual cleanup affordance (`feature`)
+- [#46](https://github.com/udog21/subsounder/issues/46) Confirmed/unconfirmed state on catalog rows — Class A/B confidence surface (pairs with #83/#84) (`feature`)
+- [#72](https://github.com/udog21/subsounder/issues/72) Trial → renewal duplicate identity — alpha invitees on trials would hit duplicate rows without this (`reliability`)
+- [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar `billing_cadence` — known GoDaddy-class misfire from 1-year date-gap inference (`llm`)
+- [#91](https://github.com/udog21/subsounder/issues/91) MVP LLM eval fixture harness — catches extraction regressions across prompt iterations (`llm`)
+
+### Silent-provider sonar workflow ([ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md))
+
+*Class C signals from alpha-backfill incomplete forwards land in a bench above the catalog, where invitees can promote or dismiss without polluting catalog rows.*
+
+- [#83](https://github.com/udog21/subsounder/issues/83) Sonar pings bench — Class C provider pills with dismiss + promote-to-card (`feature`)
+- [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (`llm`)
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires on Lek's stack (subtle ones filed); catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup → alias generation → first forwarded email → first parsed subscription in the catalog, with no hand-holding.
 
