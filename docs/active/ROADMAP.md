@@ -50,7 +50,7 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
 | **M0** | Dogfood officially begins | ✅ 2026-05-28 |
-| **M1** | Alpha invites go out | Fri 2026-06-12 |
+| **M1** | Alpha invites go out | Mon 2026-07-05 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
 ---
@@ -88,21 +88,38 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 
 ## Phase 1 — Dogfood · *current*
 
-**Goal:** Lek lives in the product as a real daily user; ship the catalog affordances he wants during dogfood and that a *second* person will also need — including the CSV onboarding backfill that lets alpha invitees seed silent-provider subs (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)).
+**Goal:** Ship the full user lifecycle UI — onboarding (alias generation, welcome email, empty-state flow), catalog seeding via email forwarding (no statement CSV upload required during dogfood), signal parsing, promotion to catalog, and curation/pruning. Lek lives in the product as a real daily user, and a brand-new wedge invitee (modern software stack operator — see [market-and-positioning.md](../market-and-positioning.md)) can onboard cleanly with forwarding alone. Silent-provider CSV seeding moves to Phase 2 where alpha feedback tests whether it's needed for day-1 value.
 
-**Scope** (open only; #4 Dismiss shipped during dogfood, will be summarized in `What landed` when M1 is reached):
-- [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action (`feature`)
-- [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email (`feature`)
-- [#46](https://github.com/udog21/subsounder/issues/46) Replace Needs Review window with confirmed/unconfirmed state on catalog rows — trust signal for CSV-seeded vs. email-confirmed rows (pairs with #78) (`feature`)
-- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — `create_pod_and_profile` RPC doesn't populate `pods.alias_email`; net-new signups unusable without a manual UPDATE (current dogfood accounts have hand-set aliases, so not M0-blocking — but every alpha invitee hits this on day one) (`reliability`)
-- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — add FAQ + onboarding hint so Outlook-using alpha invitees aren't silently dead-ended (`feature`)
-- [#72](https://github.com/udog21/subsounder/issues/72) Matcher creates duplicate identity on `trial_start` → `renewal_notice` — alpha invitees who try a free trial then convert would hit duplicate rows without this (`reliability`)
-- [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar receipts: `billing_cadence` not inferred from 1-year date gap — known recurring misfire on GoDaddy-class subs (`llm`)
-- [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
-- [#83](https://github.com/udog21/subsounder/issues/83) Sonar pings bench — Class C provider pills above catalog with dismiss + promote-to-card actions (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`feature`)
-- [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`llm`)
+**Scope** — three themes, each a sub-goal of the Phase 1 goal above. #4 Dismiss shipped during dogfood; will be summarized in `What landed` when M1 is reached.
 
-**Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to a seeded catalog (CSV backfill working end-to-end) and first forwarded email with no hand-holding.
+### Onboarding the first new user
+
+*A brand-new wedge invitee goes from landing page → signup → alias → first forwarded email → useful catalog, with no hand-holding.*
+
+- [#94](https://github.com/udog21/subsounder/issues/94) In-codebase landing page + privacy + ToS pages — scratch-built (not a Webflow port); disconnect Webflow after DNS swap. Privacy/ToS are M1-required for alpha invitees (`marketing`)
+- [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — fix `create_pod_and_profile` RPC so net-new signups get a pod alias (every alpha invitee hits this on day one) (`reliability`)
+- [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email — copy reframed for the wedge ICP (`feature`)
+- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — FAQ + onboarding hint so Outlook-using invitees aren't silently dead-ended (`feature`)
+- [#90](https://github.com/udog21/subsounder/issues/90) Seed top ~30 wedge-provider cancellation data — actionable cancellation info on day-one catalog rows (`feature`)
+
+### Catalog quality + parser correctness
+
+*Lek lives in the catalog daily without it degrading; the parser handles the wedge stack's known misfires; future prompt iterations are caught by a regression harness.*
+
+- [#5](https://github.com/udog21/subsounder/issues/5) Mark as cancelled action — manual cleanup affordance (`feature`)
+- [#46](https://github.com/udog21/subsounder/issues/46) Confirmed/unconfirmed state on catalog rows — Class A/B confidence surface (pairs with #83/#84) (`feature`)
+- [#72](https://github.com/udog21/subsounder/issues/72) Trial → renewal duplicate identity — alpha invitees on trials would hit duplicate rows without this (`reliability`)
+- [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar `billing_cadence` — known GoDaddy-class misfire from 1-year date-gap inference (`llm`)
+- [#91](https://github.com/udog21/subsounder/issues/91) MVP LLM eval fixture harness — catches extraction regressions across prompt iterations (`llm`)
+
+### Silent-provider sonar workflow ([ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md))
+
+*Class C signals from alpha-backfill incomplete forwards land in a bench above the catalog, where invitees can promote or dismiss without polluting catalog rows.*
+
+- [#83](https://github.com/udog21/subsounder/issues/83) Sonar pings bench — Class C provider pills with dismiss + promote-to-card (`feature`)
+- [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (`llm`)
+
+**Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires on Lek's stack (subtle ones filed); catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup → alias generation → first forwarded email → first parsed subscription in the catalog, with no hand-holding.
 
 ### ◆ M1 — Alpha invites go out · target Mon 2026-07-05
 
@@ -110,11 +127,12 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 
 ## Phase 2 — Private Alpha
 
-**Goal:** Prove the funnel works on strangers' real inboxes before spending a cent on ads — and build M2's prerequisites in parallel.
+**Goal:** Prove the funnel works on wedge-ICP invitees' real inboxes (Tier 1 AI-native solo operators first; Tier 1.5 makers / Tier 2 media creators as reachable — see [market-and-positioning.md](../market-and-positioning.md)), validate during alpha whether silent-provider seeding (CSV backfill + Class C signals) is needed for day-1 value or just nice-to-have, and build M2's prerequisites in parallel.
 
 **Scope — alpha experience:**
 - [#6](https://github.com/udog21/subsounder/issues/6) Edit subscription — minimal field set; doubles as the inline-financial-enrichment affordance for silent-provider welcome emails (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 - [#15](https://github.com/udog21/subsounder/issues/15) Free trial countdown UI on catalog cards (`feature`)
+- [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only. Tests during alpha whether wedge invitees need silent-provider seeding to find day-1 value (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 - [#79](https://github.com/udog21/subsounder/issues/79) Silent-provider price-change surfacing — when a forwarded price-change email updates `products.pricing`, flag catalog rows holding the old amount as "may be stale" (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
 
 **Scope — M2 prerequisites (built in parallel):**
@@ -123,9 +141,9 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 - [#18](https://github.com/udog21/subsounder/issues/18) Cancellation-intel research — top 50–100 providers, ranked by "how to cancel X" search volume (`feature`)
 - [#19](https://github.com/udog21/subsounder/issues/19) Registry site — scaffold `subscription-registry` repo + publish provider pages (`marketing`)
 - [#20](https://github.com/udog21/subsounder/issues/20) Spend total as a first-class headline number — the conversion hook (`feature`)
-- [#21](https://github.com/udog21/subsounder/issues/21) Multi-currency support (`feature`)
+- [#21](https://github.com/udog21/subsounder/issues/21) Multi-currency support — alpha cohort may include Tier 1 invitees with non-USD billing (e.g., EU-based founders' n8n / Supabase receipts) (`feature`)
 
-**Gate (→ M2):** ≥5 invited testers activate — catalog reaches ≥3 correct subscriptions — within 2 weeks of their invite; no tester hits an unexplained, trust-breaking data error.
+**Gate (→ M2):** ≥5 invited testers activate within 2 weeks of invite (each catalog reaches >3 correct subscriptions) AND remain engaged ≥2 weeks post-activation (sustained forwarding, repeat catalog visits); spontaneous value-prop sentiment captured from ≥3 of them; no tester hits an unexplained, trust-breaking data error.
 
 ### ◆ M2 — Public Beta launch + paid search ads · date set after M1
 
