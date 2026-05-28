@@ -1,6 +1,6 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-27. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+_Last updated: 2026-05-28. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
 
 ## Product principles
 
@@ -100,6 +100,8 @@ Validated on real receipts from: Apple bundle, Stripe (Answer The Public, Eleven
 - [#72](https://github.com/udog21/subsounder/issues/72) Matcher creates duplicate identity on `trial_start` → `renewal_notice` — alpha invitees who try a free trial then convert would hit duplicate rows without this (`reliability`)
 - [#74](https://github.com/udog21/subsounder/issues/74) Domain registrar receipts: `billing_cadence` not inferred from 1-year date gap — known recurring misfire on GoDaddy-class subs (`llm`)
 - [#78](https://github.com/udog21/subsounder/issues/78) CSV onboarding backfill — one-time bank/CC statement import to seed legacy silent-provider subs; third-party PDF→CSV upstream, SubSounder parses standardized CSV column shapes only (per [ADR-0003](../adr/0003-no-bank-connection-ingestion-strategy.md)) (`feature`)
+- [#83](https://github.com/udog21/subsounder/issues/83) Sonar pings bench — Class C provider pills above catalog with dismiss + promote-to-card actions (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`feature`)
+- [#84](https://github.com/udog21/subsounder/issues/84) Prompt vN — silent-provider signal types (`welcome`, `tos_update`, `anniversary`) + `signal_strength` for matcher Class assignment (per [ADR-0004](../adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) (`llm`)
 
 **Gate (→ M1):** Sustained — across ~a week of real ongoing use, zero *glaring* parser misfires (subtle ones filed); Lek's catalog stays manageable via Dismiss + Mark-cancelled during dogfood; the onboarding flow takes a brand-new user from signup to a seeded catalog (CSV backfill working end-to-end) and first forwarded email with no hand-holding.
 
@@ -136,6 +138,7 @@ Not scheduled. Promote into a phase when prioritized.
 
 - [#22](https://github.com/udog21/subsounder/issues/22) Spend analytics charts (`feature`)
 - [#23](https://github.com/udog21/subsounder/issues/23) Family / pod sharing (`feature`)
+- [#85](https://github.com/udog21/subsounder/issues/85) Renewal-reminder threshold gate — fixed annual-spend floor v1, user-configurable later (deferred out of M1 to protect Jul 5 target; candidate for Phase 2 once alpha reminder noise becomes visible) (`feature`)
 - Scale paid spend — ramp daily budget as unit economics hold
 - Monetization decision — free / freemium / paid tier
 - Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated)
