@@ -50,7 +50,7 @@ The discipline: **scope complete is necessary but not sufficient — the Gate is
 |---|---|---|
 | **MVP** | Pipeline works end-to-end | ✅ ~2026-05-14 |
 | **M0** | Dogfood officially begins | ✅ 2026-05-28 |
-| **M1** | Alpha invites go out | Fri 2026-06-12 |
+| **M1** | Alpha invites go out | Mon 2026-07-05 |
 | **M2** | Public Beta launch + paid search ads | TBD — set after M1 |
 
 ---
@@ -94,8 +94,9 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 
 ### Onboarding the first new user
 
-*A brand-new wedge invitee goes from signup → alias → first forwarded email → useful catalog with no hand-holding.*
+*A brand-new wedge invitee goes from landing page → signup → alias → first forwarded email → useful catalog, with no hand-holding.*
 
+- [#94](https://github.com/udog21/subsounder/issues/94) In-codebase landing page + privacy + ToS pages — scratch-built (not a Webflow port); disconnect Webflow after DNS swap. Privacy/ToS are M1-required for alpha invitees (`marketing`)
 - [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — fix `create_pod_and_profile` RPC so net-new signups get a pod alias (every alpha invitee hits this on day one) (`reliability`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email — copy reframed for the wedge ICP (`feature`)
 - [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — FAQ + onboarding hint so Outlook-using invitees aren't silently dead-ended (`feature`)
