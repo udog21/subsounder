@@ -1,14 +1,20 @@
 # Market & Positioning — SubSounder
 
-_Last updated: 2026-05-27. Supersedes the former `competitive-analysis.md`._
+**Subscription intelligence for modern software stacks.**
+
+_Last updated: 2026-05-28. Pivots positioning from generic consumer audience to modern software stack operators (indie hackers, vibe coders, AI-heavy freelancers, small SaaS founders, technical creators, automation builders — plus the makers and media creators with overlapping tool stacks). Supersedes the former `competitive-analysis.md`._
 
 This doc answers two questions in order: **who is SubSounder for**, and **given that audience, how does SubSounder differ from other tools in the recurring-spend-tracking space**. The user profile motivates the competitive framing — not the other way around. Implementation plans (cancellation-intel pipeline mechanics, CASA Tier 2 process, etc.) live in [ROADMAP](active/ROADMAP.md) and the issues underneath it; they don't live here.
 
 ## Why this doc exists
 
-The product was originally framed as "AI parses subscription emails." Backfilling a real personal catalog from bank statements revealed the assumption underneath that framing is wrong for the most common consumer subscriptions. Netflix, Spotify, Adobe, Trupanion, and most streaming/insurance/membership providers charge silently. They have a structural disincentive to remind users they're paying, since receipt emails create unsubscribe friction.
+The product was originally framed as "AI parses subscription emails — for anyone with subscriptions." Real use reshaped that framing in two ways.
 
-That partition (transactional providers vs. silent providers) reshapes who the product can serve and how. The architectural decision that follows — how ingestion handles both classes of provider — is recorded in [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md).
+First, backfilling a real personal catalog from bank statements revealed that the most common *generic-consumer* subscriptions don't email per-cycle receipts. Netflix, Spotify, Adobe, Trupanion, and most streaming/insurance/membership providers charge silently — they have a structural disincentive to remind users they're paying, since receipt emails create unsubscribe friction. This partition (transactional providers vs. silent providers) reshapes who the product can serve and how. The architectural response is recorded in [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md); the silent-provider matcher discipline is in [ADR-0004](adr/0004-silent-provider-signals-classes-and-sonar-bench.md).
+
+Second, the segment where transactional receipts dominate, where subscription pain is most acute, and where the no-bank / no-inbox-OAuth trust constraint is most strongly held is *modern software stack operators* — indie hackers, vibe coders, AI-heavy freelancers, small SaaS founders, technical creators, automation builders. They live on sprawling work stacks where receipts flow naturally, the "how to cancel X" query is already in their search history, and surprise annual-plan charges are an in-community meme. The natural expansion cohorts — makers / creator-commerce operators (Etsy sellers, Shopify microbrands, plugin/template sellers) and media creators (YouTubers, podcasters, newsletter operators) — share substantially overlapping provider universes and the same operational mindset.
+
+SubSounder pivots positioning accordingly: **subscription intelligence for modern software stacks.** The product (catalog + cancellation intel + pre-renewal warning, all without bank or inbox access) is unchanged. What narrows is who we *position* for first, which providers seed the catalog and the registry, and which audiences the alpha tests against. The generic-consumer segment isn't abandoned — it's the natural expansion once the wedge proves, and the silent-provider workflow (ADR-0003 / ADR-0004) is the on-ramp for that expansion.
 
 ## The provider partition
 
@@ -26,34 +32,79 @@ This is not a rare edge case. In a typical household catalog, the silent group i
 
 ## Primary user profile
 
-SubSounder's user is best described by what they want from a subscription tool and what they explicitly *won't* do to get it.
+The wedge is defined as three concentric tiers — strongest fit first, with each outer tier sharing most of the product surface and the registry coverage of the one inside.
+
+### Tier 1 — AI-native solo operators ("modern digital builders")
+
+The strongest starting point. Indie hackers, vibe coders, AI-heavy freelancers, small SaaS founders, technical creators, automation builders.
+
+Why this tier first:
+
+- **Highest subscription density** across a single operating stack (Anthropic, OpenAI, Supabase, Cursor, Vercel, Cloudflare, Mailgun, Stripe, Linear, Notion, plus a long tail).
+- **Most tool churn** — frequent additions, frequent abandonments, frequent annual-plan regret.
+- **Strongest renewal pain** — surprise annual charges are an in-community meme.
+- **Already accustomed to forwarding / admin workflows** — they operate on email natively.
+- **Publicly discuss tooling** — Twitter/X, Indie Hackers, r/ClaudeCode, r/cursor, r/ChatGPT, build-in-public threads. Discoverable.
+- **Already search "how to cancel X"** — the cancellation registry meets them where they are.
+- **Unusually aligned with the trust constraints** — they refuse bank connection and refuse inbox OAuth as a matter of professional habit, while still wanting a high-fidelity catalog.
+
+### Tier 1.5 — Makers / creator-commerce operators
+
+Close behind. Etsy sellers, Shopify microbrands, solo 3D-print and STL shops, laser engraving shops, merch creators, Gumroad sellers, plugin / template / CAD-asset sellers.
+
+Why they fit well:
+
+- Lots of fragmented subscriptions across payment, shipping, storefront, design, AI, and bookkeeping tools.
+- Many "small but persistent" recurring costs that fall off mental tracking.
+- Payment-provider fragmentation (Stripe + Etsy Payments + Shopify Payments + Gumroad + PayPal).
+- Operational tool sprawl, seasonal experimentation, frequent trials.
+- Privacy-conscious / ownership-oriented mindset.
+
+Typical stack: Shopify, Etsy, Canva, Adobe, Printables / Patreon subscriptions, shipping software, newsletter/email tools, domains/hosting, AI tools, bookkeeping tools, Discord/community subscriptions, cloud render/storage tools.
+
+**The strategic overlap with Tier 1:** modern Etsy or 3D-print operators are increasingly heavy AI-tool users — Midjourney, ChatGPT, Claude, Canva, Shopify, Descript, ElevenLabs, Notion, Cursor — so the provider universe substantially overlaps. The registry coverage, the SEO / content graph, and the parser / matcher work scale across both tiers with minimal duplication.
+
+### Tier 2 — Creators / media operators
+
+YouTubers, podcasters, streamers, newsletter creators, social media operators. Heavy provider overlap with Tiers 1 and 1.5.
+
+Ranked slightly lower because:
+
+- The pain is often broader "business chaos" — bookkeeping, contracts, scheduling — not specifically subscription sprawl.
+- Many creator subscriptions are operationally visible already (the studio software the creator uses every day is not the forgotten one).
+
+Still a strong expansion cohort once the wedge is proven, and registry coverage already serves them.
+
+### Shared across the tiers
 
 **Wants:**
-- A complete catalog of recurring spend, not a probabilistic list.
+- A complete catalog of recurring spend across a sprawling work stack — not a probabilistic list.
 - Warning *before* charges hit, not categorization *after*.
 - Specific, actionable next steps (this is hard to cancel; this is easy; here's the URL).
-- A tool that knows what Netflix Family means, not one that just says "NTFLX 1234."
+- A tool that knows what Cursor Pro means, not one that just says "STRIPE 1234."
 
 **Will not:**
 - Connect a bank account or credit card.
 - Hand over read access to their email inbox.
 - Spend their evenings manually entering subscriptions into a spreadsheet.
 
-This combination — wants depth and proactivity, won't trade away financial-account access — defines the segment. It's narrower than "anyone who has subscriptions," and it's what makes a subscription-specific tool defensible against bank-connected personal finance apps.
+The combination — wants depth and proactivity, won't trade away financial-account or inbox access, and lives on a stack big enough that visibility itself is the value — defines the wedge. It's much narrower than "anyone who has subscriptions," and it's what makes a subscription-specific tool defensible against both bank-connected personal-finance apps and generic-consumer subscription managers.
 
 ## Who SubSounder is *not* for
 
 - **Users who'd connect a bank account if it meant the catalog filled itself.** Rocket Money serves them better. This is most of the personal-finance-app audience.
 - **Users who want a single-pane-of-glass for all recurring expenses including utilities, HOA, leases, insurance auto-debits.** That's a personal-finance-app problem and requires the bank-connection model SubSounder rejects.
-- **Users tracking 1–3 subscriptions.** A calendar reminder is enough; no app needed.
+- **Generic-consumer households whose subscription universe is mostly streaming, gym, and insurance.** Those providers are predominantly silent, which means the catalog has to be seeded from a bank/card CSV rather than from receipts that flow in passively. The wedge value (high-fidelity catalog for a transactional work stack + cancellation intel for tools the user actively manages) doesn't speak to them. They're a natural *expansion* once the wedge proves and the silent-provider workflow (per [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md) / [ADR-0004](adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) becomes the primary use case rather than the backfill.
+- **Operators with 1–3 subscriptions.** A calendar reminder is enough; no app needed. The wedge value scales with sprawl.
 - **Households with one shared subscription account where someone else handles billing.** No forwarded emails means no signal.
 
-The first two — bank-connection-willing and all-recurring-expenses-tracker — are the largest cohorts in this space. We deliberately don't compete for them.
+The first three — bank-connection-willing, all-recurring-expenses-tracker, and generic-consumer streaming-and-gym tracker — are the largest cohorts in this space. We deliberately don't compete for them in the wedge phase.
 
 ## What SubSounder does for this user (value proposition)
 
 Independent of who else is in the market, SubSounder:
 
+- **Surfaces what you're spending across a sprawling stack.** The "how much am I paying for tools?" answer in one view — each row showing what it is, when it renews, what it costs, and how to cancel. When the stack has more than a dozen subscriptions, visibility itself is the wedge value.
 - **Knows what you're paying for, not just that you're paying.** Plan tier, trial vs. paid, Apple bundle decomposition, distinguishing co-provider products (Photoshop vs Lightroom under Adobe; multiple domains under one registrar). Identity precision comes from email content, not a statement line.
 - **Warns before the charge, not after.** Pre-renewal reminders from observed cadence. Trial `cancel_by_at` extracted from welcome emails, so the user catches the cancel window — not the surprise charge.
 - **Tells you how to act, not just what you have.** Each catalog row carries the cancellation URL, a difficulty rating, and the steps to follow. Future agent capabilities (auto-cancel, cancel-by-agent) build on the same data.
@@ -64,20 +115,21 @@ Independent of who else is in the market, SubSounder:
 
 The bet:
 
-> There is a meaningful population of recurring-spend-aware users who would rather forward subscription emails than connect a bank, and who today have no good tool because manual-entry apps (Vexly) are too high-friction and bank-connected apps (Rocket Money) require trust they won't give.
+> Modern software stack operators — Tier 1 first, with the makers and media creators in Tiers 1.5 and 2 sharing most of the provider universe — would rather forward subscription emails than connect a bank or grant inbox OAuth, today have no tool built for them specifically, and are reachable through the communities and search surfaces they already inhabit.
 
 What "meaningful" needs to mean for SubSounder to be worth building:
 
-- Large enough to sustain free + paid tiers at usable acquisition cost.
-- Persistent — privacy preferences don't evaporate when a new feature ships elsewhere.
-- Reachable — there are search queries, communities, or content surfaces that find them.
+- **Large enough** to sustain free + paid tiers at usable acquisition cost. Tier 1 alone is small but high-WTP; Tier 1.5 broadens the catchment; Tier 2 extends further with minimal additional product cost (the registry coverage carries over).
+- **Persistent** — the trust constraints (no bank, no inbox OAuth) and the stack-operator identity don't evaporate when a new feature ships elsewhere.
+- **Reachable** — concrete surfaces exist: Indie Hackers, r/ClaudeCode / r/cursor / r/ChatGPT, AI Twitter/X, build-in-public threads, Etsy / Shopify maker subreddits, creator-tool communities. Plus the "how to cancel X" search queries the registry will earn rank on (weighted toward the modern-stack provider set first).
 
 The alpha (M1 → M2) is the first real test:
-- Whether alpha invitees stay engaged after the first forwarded email.
-- Whether the cancellation-intel content (registry pages) attracts the right traffic.
-- Whether "no bank connection" shows up in spontaneous user feedback as a positive vs. an indifferent feature.
+- Whether alpha invitees from the wedge stay engaged after the first forwarded email.
+- Whether the cancellation-intel content (registry pages weighted toward the modern-stack provider set) attracts the right traffic.
+- Whether "no bank connection / no inbox OAuth" shows up in spontaneous user feedback as a positive vs. an indifferent feature.
+- Whether silent-provider workflow surfaces (still partly load-bearing during dogfood, per [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md) / [ADR-0004](adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) come up enough in the wedge audience to remain in M1's critical path — or fade as a personal-life concern outside the wedge's main pain.
 
-If the segment turns out smaller than hoped, SubSounder's options are to either (a) narrow further into a niche/premium positioning, or (b) reopen the bank-connection exclusion. This doc's job is to make that "or" visible, not to pretend it's already decided.
+The wedge can be **expanded outward** — toward generic consumer, or into adjacent operator segments — after it proves. It does not need to be narrowed further first. If signal in the wedge fails, the strategic alternatives are still (a) re-narrow further into a deeper niche/premium positioning, or (b) reopen the bank-connection exclusion. This doc's job is to make that "or" visible, not to pretend it's already decided.
 
 ## Competitive landscape
 
@@ -98,6 +150,8 @@ If the segment turns out smaller than hoped, SubSounder's options are to either 
 | **Family sharing** | No | Yes | No | Yes | Planned (Beyond M2) |
 | **Pricing** | Free | $0 / $24yr / $39 lifetime | Unknown | Free + Premium tier | TBD |
 | **User scale** | ~2,000 | Early adopter | Unknown | 10M+ members | Dogfood (M0) |
+
+None of the listed players target stack-aware operators specifically. Subkai is the closest by audience overlap (technical Gmail users), but it's still detection-only and Gmail-OAuth-gated. The "subscription intelligence for modern software stacks" framing — high-fidelity catalog + actionable cancellation intel + pre-renewal warning, scoped to the modern operator stack — is currently uncontested.
 
 ### Player profiles
 
