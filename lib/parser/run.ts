@@ -221,7 +221,9 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       if (!sounding) continue
       soundingsWritten++
 
-      const matchResult = match(signal, subs, pod_id)
+      const matchResult = match(signal, subs, pod_id, {
+        classification: valid.classification,
+      })
 
       let productId: string | null = null
       let cancellationUrl: string | null = null

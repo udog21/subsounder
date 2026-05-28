@@ -242,10 +242,15 @@ function buildCyclePayload(signal: ExtractionSignal): CycleInsert {
   }
 }
 
+export interface MatchOptions {
+  classification?: 'subscription' | 'maybe_subscription' | 'not_subscription' | 'spam'
+}
+
 export function match(
   signal: ExtractionSignal,
   existingSubscriptions: ExistingSubscription[],
   podId: string,
+  options: MatchOptions = {},
 ): MatchResult {
   let bestScore = 0
   let bestMatch: ExistingSubscription | null = null
@@ -267,6 +272,19 @@ export function match(
       subscriptionPayload: buildUpdateSubscriptionPayload(signal, bestMatch, podId),
       cyclePayload,
     }
+  }
+
+  // #70 one-shot transaction guard. A `receipt` signal with no cadence AND no
+  // next_renewal_at is the structural fingerprint of a one-time purchase
+  // (Apple Movie Rental, in-app purchase, hardware order). Block the insert
+  // unless the classifier was confident this was a subscription. `charge` has
+  // the same shape and is a candidate for the same guard if misfires appear.
+  const isOneShotShape =
+    signal.signal_type === 'receipt' &&
+    signal.billing_cadence == null &&
+    signal.next_renewal_at == null
+  if (isOneShotShape && options.classification !== 'subscription') {
+    return { action: 'skip', subscriptionPayload: buildSubscriptionPayload(signal, podId), cyclePayload }
   }
 
   return { action: 'insert', subscriptionPayload: buildSubscriptionPayload(signal, podId), cyclePayload }
