@@ -1,0 +1,200 @@
+/* Shared marketing-page chrome: layout shell, footer, prose styles for
+   /landing, /privacy, /terms. Inherits the dark background from globals.css. */
+
+.shell {
+  min-height: 100vh;
+  color: #f0f0f0;
+}
+
+.shellInner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+}
+
+/* ─── Footer ─── */
+.footer {
+  margin-top: auto;
+  padding-top: 32px;
+  border-top: 1px solid #1f1f1f;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.footerLinks {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.footerLinks a {
+  color: #a8a8a8;
+  font-size: 13px;
+}
+
+.footerLinks a:hover {
+  color: #f0f0f0;
+}
+
+.footerSmall {
+  font-size: 11px;
+  color: #555;
+}
+
+.footerSmall a {
+  color: #888;
+  text-decoration: underline;
+}
+
+/* ─── Generic prose page (privacy, terms) ─── */
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.proseHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.proseHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.proseHeaderTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.proseTitle {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* Default (narrow viewports): arrow renders inline next to the title. */
+.backArrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: background 120ms ease;
+}
+
+.backArrow img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.backArrow:hover {
+  background: #1a1a1a;
+}
+
+/* Wide viewports: float the arrow into the left margin, right-aligned to
+   the content (anchored just to the left of the title). Top-aligned with
+   the page title. */
+@media (min-width: 800px) {
+  .backArrow {
+    position: absolute;
+    top: 2px;
+    right: 100%;
+    margin-right: 12px;
+  }
+}
+
+.previewPillHeader {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.06);
+  flex-shrink: 0;
+  margin-top: 8px;
+  white-space: nowrap;
+}
+
+.proseNote {
+  padding: 12px 14px;
+  background: rgba(245, 166, 35, 0.05);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+  border-radius: 8px;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  color: #cccccc !important;
+}
+
+.proseUpdated {
+  font-size: 12px;
+  color: #6a6a6a;
+}
+
+.proseSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.proseSection h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f0f0f0;
+  margin-top: 8px;
+}
+
+.proseSection h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #d8d8d8;
+  margin-top: 4px;
+}
+
+.proseSection p,
+.proseSection li {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #cccccc;
+}
+
+.proseSection ul,
+.proseSection ol {
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proseSection a {
+  color: #f5a623;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.proseSection strong {
+  color: #f0f0f0;
+  font-weight: 600;
+}
