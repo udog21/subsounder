@@ -1,6 +1,6 @@
 # SubSounder Roadmap
 
-_Last updated: 2026-05-28. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
+_Last updated: 2026-05-29. This is the strategic plan. For tactical work units, see [GitHub issues](https://github.com/udog21/subsounder/issues) — each phase's Scope below maps to GH issues._
 
 ## Product principles
 
@@ -90,7 +90,7 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 
 **Goal:** Ship the full user lifecycle UI — onboarding (alias generation, welcome email, empty-state flow), catalog seeding via email forwarding (no statement CSV upload required during dogfood), signal parsing, promotion to catalog, and curation/pruning. Lek lives in the product as a real daily user, and a brand-new wedge invitee (modern software stack operator — see [market-and-positioning.md](../market-and-positioning.md)) can onboard cleanly with forwarding alone. Silent-provider CSV seeding moves to Phase 2 where alpha feedback tests whether it's needed for day-1 value.
 
-**Scope** — three themes, each a sub-goal of the Phase 1 goal above. #4 Dismiss shipped during dogfood; will be summarized in `What landed` when M1 is reached.
+**Scope** — four themes, each a sub-goal of the Phase 1 goal above. #4 Dismiss shipped during dogfood; will be summarized in `What landed` when M1 is reached.
 
 ### Onboarding the first new user
 
@@ -99,8 +99,15 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 - [#94](https://github.com/udog21/subsounder/issues/94) In-codebase landing page + privacy + ToS pages — scratch-built (not a Webflow port); disconnect Webflow after DNS swap. Privacy/ToS are M1-required for alpha invitees (`marketing`)
 - [#54](https://github.com/udog21/subsounder/issues/54) Signup alias generation — fix `create_pod_and_profile` RPC so net-new signups get a pod alias (every alpha invitee hits this on day one) (`reliability`)
 - [#8](https://github.com/udog21/subsounder/issues/8) Onboarding empty state + welcome email — copy reframed for the wedge ICP (`feature`)
-- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding bounce — FAQ + onboarding hint so Outlook-using invitees aren't silently dead-ended (`feature`)
-- [#90](https://github.com/udog21/subsounder/issues/90) Seed top ~30 wedge-provider cancellation data — actionable cancellation info on day-one catalog rows (`feature`)
+- [#61](https://github.com/udog21/subsounder/issues/61) Outlook M365 forwarding hint — tenant-policy variability FAQ + onboarding nudge so Outlook-using invitees self-diagnose (some tenants block external auto-forward; many don't) (`feature`)
+
+### Ingestion precision for the wedge
+
+*Stack-operator invitees overwhelmingly receive tool receipts on the same alias as their personal subs (Netflix, utilities, Audible). The forwarding rule they paste has to selectively whitelist known modern-stack billing senders, not match broad keywords — otherwise the catalog UI fills with personal noise and SubSounder ends up holding a copy of billing the user never opted to share. Shape 3 (provider-domain whitelist + payment-relay senders like Stripe/Paddle + tight phrase backstop), delivered as a Gmail `filters.xml` import file. Catalog needs ≥50 wedge providers with `billing_domains[]` populated for the rule to be useful from day one. Direct-inbox-read shapes (OAuth, CASA Tier 2 gated) are deferred — see Beyond M2.*
+
+- NEW (`reliability`) Add `products.billing_domains text[]` + harvest existing dogfood: schema migration, then populate from `soundings_log.provider_domain` for every product with ≥1 parsed receipt. Marketing `website` is wrong as a sender hint (Stripe/Paddle relay, custom DKIM domains, billing subdomains).
+- [#90](https://github.com/udog21/subsounder/issues/90) (rescoped) Wedge provider seed pipeline — generate candidate list (Reddit/X stack-survey threads, Product Hunt, peer networks), prioritize top 50, populate `billing_domains[]` + `cancellation_*` + `pricing` via (a) dogfood harvest of Lek's existing receipts, (b) trial-and-cancel campaign for high-value gaps (doubles as cancellation-intel generation), (c) research-only fill (Reddit search, vendor support docs) for low-priority gaps where receipt fidelity is less critical (`feature`)
+- NEW (`feature`) Catalog-driven Gmail filter generator — `/api/gmail-filters/[pod_id]` endpoint renders a shape-3 `filters.xml` from the catalog's `billing_domains[]` plus a fixed relay-sender list and one phrase backstop. Onboarding flow offers download-and-import; current keyword rule remains as fallback copy-paste for one release while the new flow is observed.
 
 ### Catalog quality + parser correctness
 
@@ -142,6 +149,7 @@ Validated on Lek's real receipts: Apple-bundled subscriptions (YouTube, Medium, 
 - [#19](https://github.com/udog21/subsounder/issues/19) Registry site — scaffold `subscription-registry` repo + publish provider pages (`marketing`)
 - [#20](https://github.com/udog21/subsounder/issues/20) Spend total as a first-class headline number — the conversion hook (`feature`)
 - [#21](https://github.com/udog21/subsounder/issues/21) Multi-currency support — alpha cohort may include Tier 1 invitees with non-USD billing (e.g., EU-based founders' n8n / Supabase receipts) (`feature`)
+- NEW (`feature`) Alpha survey — direct-inbox-read demand discovery. Two distinct shapes share a CASA Tier 2 review and require choosing one (or sequencing both) post-M2: **shape 4** server-managed Gmail filter via `gmail.settings.basic` (privacy story: "we only see receipts from providers on our list"; no backfill; bounded parsing cost) vs **shape 5** direct ingest via `gmail.readonly` + Pub/Sub watch (12-month backfill on connect; broader scope, harder trust story). This issue is *measurement only* — survey questions + pull signal — not shipping either shape. The result feeds the post-M2 CASA T2 investment decision.
 
 **Gate (→ M2):** ≥5 invited testers activate within 2 weeks of invite (each catalog reaches >3 correct subscriptions) AND remain engaged ≥2 weeks post-activation (sustained forwarding, repeat catalog visits); spontaneous value-prop sentiment captured from ≥3 of them; no tester hits an unexplained, trust-breaking data error.
 
@@ -158,7 +166,7 @@ Not scheduled. Promote into a phase when prioritized.
 - [#85](https://github.com/udog21/subsounder/issues/85) Renewal-reminder threshold gate — fixed annual-spend floor v1, user-configurable later (deferred out of M1 to protect Jul 5 target; candidate for Phase 2 once alpha reminder noise becomes visible) (`feature`)
 - Scale paid spend — ramp daily budget as unit economics hold
 - Monetization decision — free / freemium / paid tier
-- Gmail OAuth bulk-scan — instant catalog seed (CASA Tier 2 gated)
+- Gmail OAuth ingestion — both candidate shapes are CASA Tier 2 gated and deferred until paid base justifies the review cost: **shape 4** (server-managed filter via `gmail.settings.basic`, no backfill, narrow-scope trust story) and **shape 5** (direct ingest via `gmail.readonly` + Pub/Sub watch, 12-month backfill on connect, broader scope). Alpha survey (Phase 2) discovers which shape — or sequencing of both — to commit to. Microsoft Graph mail-read for Outlook business invitees sits behind the same gate plus tenant admin-consent friction; same deferral applies.
 - Browser-extension forwarder — catch welcome flows at point-of-subscribe
 - Live bank/card API connection (Plaid/Teller/MX) — explicitly out of scope; a different product class (competes with Rocket Money). One-shot statement (CSV) upload is a separate mechanism, not covered by this exclusion.
 
