@@ -2,7 +2,7 @@
 
 **Subscription intelligence for modern software stacks.**
 
-_Last updated: 2026-05-28. Pivots positioning from generic consumer audience to modern software stack operators (indie hackers, vibe coders, AI-heavy freelancers, small SaaS founders, technical creators, automation builders — plus the makers and media creators with overlapping tool stacks). Supersedes the former `competitive-analysis.md`._
+_Last updated: 2026-05-28. Pivots positioning from generic consumer audience to modern software stack operators (indie hackers, vibe coders, AI-heavy freelancers, small SaaS founders, technical creators, automation builders — plus the makers and media creators with overlapping tool stacks). Supersedes the former `competitive-analysis.md`. The canonical decision record for the wedge pivot is [ADR-0005](adr/0005-wedge-icp-modern-software-stacks.md)._
 
 This doc answers two questions in order: **who is SubSounder for**, and **given that audience, how does SubSounder differ from other tools in the recurring-spend-tracking space**. The user profile motivates the competitive framing — not the other way around. Implementation plans (cancellation-intel pipeline mechanics, CASA Tier 2 process, etc.) live in [ROADMAP](active/ROADMAP.md) and the issues underneath it; they don't live here.
 
