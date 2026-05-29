@@ -49,6 +49,13 @@ correction.
   plain file links for content too long to inline. Repo docs are a consult-later
   resource for the human — the primary content channel during a session is the
   chat itself.
+- **Long-form drafts go to files, not chat.** A whole new document, a
+  section-level rewrite, or any artifact that reads as "complete in itself"
+  belongs in the working branch as a file the human can open in their IDE,
+  not pasted inline. Chat lines don't wrap and the horizontal scrollbar
+  typically sits below the visible viewport, so long inline drafts are hard
+  to read and easy to misjudge in scope. Short snippets (a paragraph, a few
+  bullets, a copy edit) stay inline — the previous bullet still applies.
 - **Plan in time-boxed, ROI-legible chunks.** SubSounder is one of several
   solo-founder projects; the founder's hours are the scarce resource, not
   money. Give every milestone and step a rough time cost and a one-line "what
@@ -250,6 +257,37 @@ ADMIN_EMAIL
 - Server components fetch data directly via Supabase server client; no useEffect data fetching
 - Catalog UI (`app/page.tsx`) uses a CSS Module (`app/page.module.css`) — Figma CSS exports can be pasted directly into the module; computed colors (difficulty dots, trial countdown urgency) stay inline since they're runtime values
 - Errors surface as typed responses, not thrown exceptions in API routes
+
+## Voice & user-facing copy
+
+For any user-facing string — landing page, privacy policy, ToS, email templates,
+in-app microcopy, button labels, error messages — strip the markers that read as
+LLM-generated copy. The user notices; the Tier 1 wedge audience (modern-stack
+operators, vibe coders, AI-heavy freelancers) notices. Sounding generated erodes
+trust on first impression.
+
+Rules (apply to user-facing strings only; this section is about end-user copy,
+not chat communication or internal docs):
+
+- **No unearned em dashes.** LLMs over-use them as a default rhetorical move.
+  Default to periods, semicolons, parentheses, or nothing. Use the dash only
+  when it's genuinely earning its keep. Cross-codebase scrub + drift-prevention
+  tracked separately as an issue.
+- **No named brands in voice copy.** Don't drop specific provider names
+  ("Anthropic, OpenAI, Vercel, Cursor, Supabase, Notion") into landing-page or
+  marketing prose, even when they're accurate. Use category descriptions
+  instead ("long-tail SaaS, prosumer tools, API credits"). Brand names are
+  fine in integration docs, case studies, or when surfacing a specific
+  subscription in the catalog UI.
+- **Prefer plain over flourished.** Shorter sentences over rhetorical
+  ornamentation; concrete claims over vague benefit-speak. "Marketing fluff"
+  will get called out.
+- **The audience can handle technical specificity.** The Tier 1 wedge is more
+  comfortable with technical concreteness than a generic-consumer audience
+  would be. Lean into that, don't soften it.
+
+Do an explicit final pass on any user-facing string before reporting the work
+as done.
 
 ## IDE
 VS Code with the Claude Code extension. MCP logs are in the Output panel → "Claude Code" or "Claude Code MCP" dropdown after reloading the window (`Ctrl+Shift+P` → "Developer: Reload Window").
