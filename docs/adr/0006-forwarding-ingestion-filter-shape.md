@@ -20,6 +20,8 @@ The open question this ADR answers: **given the wedge ICP and the forwarding mec
 
 This document answers all three.
 
+Ingestion has two temporal modes: **prospective** (standing rule, catches future receipts) and **backfill** (historical sweep of mail already in the inbox). §1–§10 architect the prospective mode. §11 specializes the design to the backfill mode.
+
 ## Decision
 
 ### 1. Trust boundary — forwarding, not extension, not direct read
@@ -122,6 +124,17 @@ Once the discovery filter is sunset (§8), a user signing up for a tool not yet 
 
 Picking a default UX is deferred to the cutoff implementation moment. The option set is recorded here so it is not relitigated as a fresh question later.
 
+### 11. Backfill ingestion — `from:`-whitelisted historical sweep
+
+Sections 1–10 architect **prospective forwarding**: standing rules that catch mail going forward. **Backfill** — a one-shot sweep of mail already in the user's inbox — is a distinct temporal mode of the same forwarding architecture. It shares the trust boundary (§1) and delivery channel (§6) but operates under a different noise environment, which tunes the filter shape (§2–§3) differently.
+
+- **Trust boundary (§1)** — unchanged. Backfill via `from:`-whitelisted search-and-forward stays inside the user-mediated forwarding posture; no read access to historical mail is requested. Future first-class backfill via OAuth bulk-scan (`gmail.readonly` + Microsoft Graph mail-read) follows §1's Beyond-M2 deferral with direct ingest.
+- **Filter shape (§2–§3)** — `from:` whitelist drawn from the `providers` registry (entries with `safe_to_filter_by_name = true`), intersected with billing vocabulary. The `from:` constraint blocks the commerce-mail vector §3 guards against, so backfill's vocabulary is broader by design: the §3 standing-discovery set (`subscription / renewal / trial / recurring`) **plus** the §3-excluded set (`billing / invoice / receipt`). Founder dogfood (2026-05-30) confirmed the §3 narrow set alone misses receipts that use commerce vocabulary; intersection with the expanded set caught them without re-introducing notification noise. **Vocabulary divergence is intentional, not a §3 override** — standing-discovery and backfill filters tune to their own noise environments; evidence from one does not transfer to the other.
+- **Delivery channel (§6)** — server-rendered search string the user pastes into Gmail or Outlook web search, with manual select-and-forward to the pod alias. Both providers expose compatible `from:` search semantics, so the same intersection shape works in both with date-syntax adjustment.
+- **First-class backfill is Beyond M2.** OAuth bulk-scan (12-month history on connect) is more capable than search-and-forward and is the eventual path; gated on CASA Tier 2 (Gmail) and M365 App Certification (Outlook) per §6.
+
+Implementation tracked at [#117](https://github.com/udog21/subsounder/issues/117).
+
 ## Consequences
 
 **Positive:**
@@ -150,6 +163,7 @@ Picking a default UX is deferred to the cutoff implementation moment. The option
 - Parser and matcher unchanged. Filter architecture affects which signals reach them, not how they process.
 - Doesn't override [ADR-0003](0003-no-bank-connection-ingestion-strategy.md) (no bank connection) or [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md) (signal classes). The post-cutoff workflow flag for reopening ADR-0003's manual-add exclusion remains a flagged future trigger, not an immediate change.
 - Refines [ADR-0005](0005-wedge-icp-modern-software-stacks.md) §3. The strategic intent (system-managed forwarding, registry compounding, importable filters, future OAuth-managed installation) is preserved verbatim; the mechanism specification is updated from "name-based with billing-domain narrowing as the post-cutoff-B state" to "split-filter (detection + discovery) with asymmetric delivery (Gmail XML, Outlook Graph OAuth)."
+- Backfill ingestion is explicitly addressed (§11); prospective and backfill modes share trust boundary (§1) and delivery channel (§6) but tune filter shape (§2–§3) independently. The pre/post-cutoff narrative (§8) is implicitly prospective-mode and remains unchanged.
 
 ## Alternatives Considered
 
