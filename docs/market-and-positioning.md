@@ -88,6 +88,8 @@ Still a strong expansion cohort once the wedge is proven, and registry coverage 
 - Hand over read access to their email inbox.
 - Spend their evenings manually entering subscriptions into a spreadsheet.
 
+**The trust posture is a bet, not a constant.** "Won't grant inbox OAuth" is observed against third-party scanners (Subkai-style products). Platform-resident inbox AI — Workspace Gemini, ChatGPT mail connectors, Apple Intelligence — is normalizing as ambient capability rather than as a granted permission, which bypasses the third-party-sharing mental category the refusal frame defends. Whether the wedge audience extends its refusal to platform AI or only to third parties is one of the things M1 alpha is set up to measure. If the refusal extends, the trust-posture moat holds against the principal long-horizon competitor. If it doesn't, the wedge defense shifts toward structural properties platform agents can't replicate.
+
 The combination — wants depth and proactivity, won't trade away financial-account or inbox access, and lives on a stack big enough that visibility itself is the value — defines the wedge. It's much narrower than "anyone who has subscriptions," and it's what makes a subscription-specific tool defensible against both bank-connected personal-finance apps and generic-consumer subscription managers.
 
 ## Who SubSounder is *not* for
@@ -105,6 +107,7 @@ The first three — bank-connection-willing, all-recurring-expenses-tracker, and
 Independent of who else is in the market, SubSounder:
 
 - **Surfaces what you're spending across a sprawling stack.** The "how much am I paying for tools?" answer in one view — each row showing what it is, when it renews, what it costs, and how to cancel. When the stack has more than a dozen subscriptions, visibility itself is the wedge value.
+- **Aggregates across inbox providers and accounts in one pod.** One pod stitches any combination of Gmail, Microsoft 365 work mail, Fastmail or ProtonMail, iCloud, and vanity-domain inboxes into one catalog. Platform-resident agents are each scoped to their own walled garden; we are not. Whether Tier 1 operators carry enough multi-provider footprint to make cross-inbox aggregation a primary wedge value rather than a backstop is one of the things M1 alpha measures — but the structural property exists either way.
 - **Knows what you're paying for, not just that you're paying.** Plan tier, trial vs. paid, Apple bundle decomposition, distinguishing co-provider products (Photoshop vs Lightroom under Adobe; multiple domains under one registrar). Identity precision comes from email content, not a statement line.
 - **Warns before the charge, not after.** Pre-renewal reminders from observed cadence. Trial `cancel_by_at` extracted from welcome emails, so the user catches the cancel window — not the surprise charge.
 - **Tells you how to act, not just what you have.** Each catalog row carries the cancellation URL, a difficulty rating, and the steps to follow. Future agent capabilities (auto-cancel, cancel-by-agent) build on the same data.
@@ -127,6 +130,8 @@ The alpha (M1 → M2) is the first real test:
 - Whether alpha invitees from the wedge stay engaged after the first forwarded email.
 - Whether the cancellation-intel content (registry pages weighted toward the modern-stack provider set) attracts the right traffic.
 - Whether "no bank connection / no inbox OAuth" shows up in spontaneous user feedback as a positive vs. an indifferent feature.
+- Whether the wedge audience's refusal of inbox access extends to platform-resident AI (Workspace Gemini, ChatGPT mail connectors, Apple Intelligence) or applies only to third-party scanners. This determines how much of the trust-posture defense survives against the principal long-horizon competitor.
+- Whether multi-inbox-provider footprint is common enough among Tier 1 invitees that cross-provider aggregation is a primary wedge value, or whether it's a structural backstop that only a minority of the segment uses.
 - Whether silent-provider workflow surfaces (still partly load-bearing during dogfood, per [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md) / [ADR-0004](adr/0004-silent-provider-signals-classes-and-sonar-bench.md)) come up enough in the wedge audience to remain in M1's critical path — or fade as a personal-life concern outside the wedge's main pain.
 
 The wedge can be **expanded outward** — toward generic consumer, or into adjacent operator segments — after it proves. It does not need to be narrowed further first. If signal in the wedge fails, the strategic alternatives are still (a) re-narrow further into a deeper niche/premium positioning, or (b) reopen the bank-connection exclusion. This doc's job is to make that "or" visible, not to pretend it's already decided.
@@ -178,6 +183,24 @@ None of the listed players target stack-aware operators specifically. Subkai is 
 - Positioned as Mint replacement; broad personal-finance tool, not subscription-focused.
 - **Weakness:** Overkill for subscription-only use case; bank access required; merchant identification limited to statement-line matching (no plan/cycle/trial nuance).
 
+#### Platform-resident inbox agents (emerging class, not in the matrix above)
+
+Not a single product. The class includes Workspace Gemini reading Gmail by default for paying users, ChatGPT with mail connectors and scheduled tasks, Apple Intelligence's on-device inbox summarization, and the analogous capabilities likely to ship inside Outlook and the major mail clients over the next 18–36 months. They sit outside the matrix above because their feature set is moving too fast to row-compare honestly and because they're framed to the user as ambient platform capability rather than as a third-party tool to evaluate.
+
+**Direction of travel** (extrapolating from current capability curves): ambient inbox reading without an explicit third-party OAuth grant, structured extraction at frontier-model quality, scheduled background runs, proactive renewal nudges, and computer-use action chains for "cancel this for me." Each capability lands separately; none is fully shipped at the quality SubSounder targets today.
+
+**Structural limits of the class** (durable):
+- Each agent sees only its own platform's mailbox. No cross-provider pod model.
+- No public registry surface for "how do I cancel X." Answers live in chats, not as owned content the user reaches via search.
+- Per-call answers, not accumulated catalog state the user owns and can export.
+
+**Contingent limits** (depend on rate of rollout):
+- Proactive pre-renewal warnings aren't reliably shipped yet at consumer-grade quality.
+- Agentic cancellation flows are early and brittle.
+- User comfort with default-on inbox AI is segment-dependent and is itself one of the things our wedge alpha measures.
+
+This class is the principal long-horizon competitive threat. The legacy tools in the matrix are the principal short-horizon threats. SubSounder's positioning has to be coherent against both, but they're different fights and the moats that work against one don't necessarily work against the other.
+
 ## How SubSounder differentiates
 
 One-line positioning: *Automatic like Subkai, private like Vexly, actionable like Rocket Money — without giving up your inbox or bank.*
@@ -204,6 +227,21 @@ One-line positioning: *Automatic like Subkai, private like Vexly, actionable lik
 - **CSV onboarding backfill** closes the legacy-sub depth that pure manual entry never reaches.
 - **Provider knowledge surfaced automatically** (cancellation procedure, difficulty), not just whatever fields the user remembered to enter.
 
+### vs. platform-resident inbox agents (Workspace Gemini, ChatGPT mail connectors, Apple Intelligence)
+
+Honest framing: against a frontier-model agent reading a user's inbox natively, identity-precision extraction is not a durable moat. The agent extracts from the source email at least as well as our pipeline does, with more context and live web lookup. Surface-level extraction differentiation gives way to a small number of structural angles.
+
+- **Cross-inbox aggregation.** A pod sees every inbox the user routes to it. Each platform agent sees only its own. For an operator running Gmail + Workspace + Fastmail + iCloud + a vanity domain, that's the difference between a catalog and a fragment.
+- **Pod sharing across non-Google infrastructure.** Households and small teams whose members aren't all on the same email provider can't be served by a single platform agent.
+- **Public registry as owned surface.** `subscriptionregistry.org` is content the user reaches via search and a clickable cancellation surface, not an answer that vanishes with the chat. (Caveat: AI Overviews are eroding search-traffic capture as a category, which the registry's SEO value is exposed to.)
+- **User-owned catalog state.** Each forwarding event lands in a structured store the user can export, share with an accountant, or query later. Platform agents currently return answers; they don't accumulate a queryable, exportable catalog the user owns across providers.
+- **Possible future hedge: be the MCP server platform agents call.** Rather than competing for the assistant surface, expose pod state as structured subscription intelligence the user's existing assistant can consume. Aspirational, not committed; depends on whether the registry accumulates data dense enough to be worth calling.
+
+What this section does *not* claim:
+
+- That extraction quality, renewal-warning, or cancellation-step retrieval are durable moats against this class on a multi-year horizon. They are not.
+- That "won't grant inbox OAuth" defends against platform AI the same way it defends against Subkai-style scanners. It defends partially; M1 alpha measures how partially.
+
 ## Ingestion model (consequence)
 
 Detailed in [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md). Summary:
@@ -218,3 +256,4 @@ Detailed in [ADR-0003](adr/0003-no-bank-connection-ingestion-strategy.md). Summa
 - **Pricing.** Free / freemium / paid tier — parked until post-M2 (see [ROADMAP](active/ROADMAP.md)).
 - **Family / multi-user pod model details.** The pod schema supports it; UX is a future scope.
 - **Whether the segment is *actually* big enough.** This doc names the bet; the alpha tests it.
+- **Posture toward platform-resident agents.** Whether SubSounder ultimately positions *against* the platform-agent class (independent assistant for stack subscriptions) or *with* it (MCP server platform agents call as a tool). The alpha and the rate of registry accumulation inform which is feasible; the call doesn't need making pre-M2, and it isn't a binary in the long run.
