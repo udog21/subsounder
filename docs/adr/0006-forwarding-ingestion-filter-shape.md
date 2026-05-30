@@ -1,112 +1,176 @@
-# ADR-0006: Forwarding ingestion filter shape — recall-first with two-cutoff narrowing
+# ADR-0006: Forwarding ingestion architecture — trust boundary, split-filter, asymmetric delivery
 
 - **Status:** Accepted
-- **Date:** 2026-05-29
+- **Date:** 2026-05-30 (supersedes 2026-05-29 draft under same ADR number)
 - **Deciders:** Lek
-- **Related:** [ADR-0003](0003-no-bank-connection-ingestion-strategy.md), [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md), [ADR-0005](0005-wedge-icp-modern-software-stacks.md), [docs/active/ROADMAP.md](../active/ROADMAP.md), PR #109 (Phase 1 ingestion-precision theme), [#90](https://github.com/udog21/subsounder/issues/90), [#110](https://github.com/udog21/subsounder/issues/110), [#111](https://github.com/udog21/subsounder/issues/111)
-- **Refines:** [ADR-0005](0005-wedge-icp-modern-software-stacks.md) §3 — specifies the mechanism behind "ingestion narrows from keyword-broad to provider-billing-domain-specific" as name-based with billing-domain narrowing as the post-cutoff-B future state
+- **Related:** [ADR-0003](0003-no-bank-connection-ingestion-strategy.md), [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md), [ADR-0005](0005-wedge-icp-modern-software-stacks.md), [docs/active/ROADMAP.md](../active/ROADMAP.md), PR #109, [#90](https://github.com/udog21/subsounder/issues/90), [#110](https://github.com/udog21/subsounder/issues/110), [#111](https://github.com/udog21/subsounder/issues/111), [#113](https://github.com/udog21/subsounder/issues/113), [#114](https://github.com/udog21/subsounder/issues/114)
+- **Refines:** [ADR-0005](0005-wedge-icp-modern-software-stacks.md) §3 — replaces the "ingestion narrows from keyword-broad to provider-billing-domain-specific via importable XML Gmail filter exports" mechanism with a broader architecture covering trust boundary, filter shape, and delivery channel. ADR-0005's strategic intent (system-managed setup, registry compounding, importable filters, future OAuth-managed installation) is preserved verbatim.
 
 ## Context
 
-[ADR-0005](0005-wedge-icp-modern-software-stacks.md) §3 committed to narrowing ingestion "from keyword-broad to provider-billing-domain-specific" via importable XML Gmail filter exports and (later) OAuth-managed forwarding-rule updates. The strategic intent — system-managed setup, registry compounding, narrow precision-improving filters — was right. PR #109 took a first pass at the mechanism (provider-billing-domain whitelist via a proposed `products.billing_domains[]` column, shape-3 rule with payment-relay senders, `filters.xml` export) and merged the Phase 1 scope theme. Follow-up design discussion surfaced two facts that invalidate the domain-first mechanism, while leaving ADR-0005's strategic intent intact.
+The wedge ICP is fixed. [ADR-0005](0005-wedge-icp-modern-software-stacks.md) named it: tool-stack operators on modern SaaS — Tier 1 AI-native solo operators, Tier 1.5 makers, Tier 2 media creators. They scrutinize permissions, audit code, and pattern-match invasive scopes to risk. The ingestion architecture has to be defensible to that audience or the wedge bounces at the onboarding step.
 
-First, signal heterogeneity. The signals SubSounder needs to catch are not uniformly billing emails. Trial confirmations arrive from product or welcome subdomains (`welcome@vercel.com`, `hello@anthropic.com`), not billing subdomains. Class C silent-provider signals named in [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md) (`welcome`, `tos_update`, `anniversary`) are by definition not billing emails. SaaS billed via Stripe/Paddle/Lemonsqueezy relays carry the merchant identity in the message body, not in the from-address. A billing-domain-only filter would create a blind spot exactly where the user-valuable signals live — trial-end dates, new-subscription detection, and silent-provider sonar all degrade. The catch-set is heterogeneous; the filter shape has to match.
+The mechanism is also fixed. [ADR-0003](0003-no-bank-connection-ingestion-strategy.md) ruled out bank-connection ingestion. [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md) named the signal classes (A billing, B identity+cadence, C silent-provider welcome/ToS/anniversary) the parser needs to catch. Together those pin a forwarding-based ingestion path: users forward subscription mail to a pod-specific alias and SubSounder parses what arrives.
 
-Second, asymmetric failure cost. The forwarding filter does not need to be high-precision because the downstream LLM extractor (active `prompt_templates` row) and matcher (`lib/parser/match.ts`) are already the precision layers. A false-positive forward costs one `gpt-4o-mini` call and is rejected at `parser_status = 'ignored'`. A false-negative forward is a missed subscription entirely — the user-visible failure mode. The cost of missing a positive signal exceeds the cost of parsing a false one by roughly an order of magnitude in user-trust terms, and several orders in dollar terms. Recall-first is the right architectural anchor; precision-first inverts the cost asymmetry.
+The open question this ADR answers: **given the wedge ICP and the forwarding mechanism, how should the ingestion be architected?** Three sub-questions, each independent, each shaping the others:
 
-These two reframings together imply that the natural ingestion shape is name-based plus generic SaaS-flavored keywords, with billing-domain narrowing reserved for a later evolution stage once the catalog matures enough to support a closed whitelist. This ADR records that specification so the mechanism does not get relitigated each time a precision optimization is proposed.
+1. **Trust boundary** — how much access does SubSounder ask for? Forwarding (narrow-or-zero mailbox access), browser extension (mailbox-write during setup), or OAuth direct inbox read (full mail read)?
+2. **Filter shape** — what mail does the user's forwarding rule actually catch? Provider names? Generic keywords? Which keywords?
+3. **Delivery channel** — how does the rule get installed in the user's mail provider? Server-rendered XML import, OAuth-managed push, browser-extension automation, or manual?
+
+This document answers all three.
 
 ## Decision
 
-### 1. Recall-first as the architectural anchor
+### 1. Trust boundary — forwarding, not extension, not direct read
 
-The forwarding filter optimizes for recall over precision. The LLM extractor and matcher are the precision layers. Every subsequent design choice in this ADR derives from this asymmetry: missed positives are the user-visible failure mode; false positives die quietly at `parser_status = 'ignored'` for a fractional-cent parse cost.
+Forwarding-based ingestion is dominant for the wedge ICP across the three positions on the trust spectrum:
 
-### 2. Initial filter shape — names plus generic terms
+- **Forwarding-based ingestion** (chosen). Narrowest technical posture on the spectrum. On Gmail, SubSounder has zero mailbox access — we receive only what the user's forwarding rule sends, and the rule itself is opaque to us. On Outlook, OAuth via Microsoft Graph grants `MailboxSettings.ReadWrite` — narrow programmatic access to inbox rules, auto-reply, time zone, and other mailbox-settings surfaces, with no message-content read. The trade-off across both channels is the most-invasive *perceived* posture: forwarding feels active ("I'm sending them my email") in a way server-side scanning does not ("they're reading what's there"). Perceived-invasiveness is mitigated by the alias being user-owned, the data flow being one-way (SubSounder never writes back to the user's inbox), and the user being able to revoke at any time — by removing the forward rule on Gmail, or revoking the OAuth grant on Outlook.
 
-The Gmail filter is generated server-side from the provider registry (`products` table — `provider_name` and `aliases[]`) plus a fixed generic-term keyword set:
+- **Browser extension with mailbox write access**. Mid technical posture (extension carries read/modify scope on mail-domain hosts during setup, even if used write-only). Familiar perceived posture for some segments. Trade-off goes the other way — broader technical access in exchange for a more-familiar setup gesture. Trust composition (open-source, read-nothing, use-once-and-uninstall) is achievable but the wedge ICP either audits the code and accepts, or pattern-matches "Chrome extension wanting Gmail" to risk and bails. Reserved as a Beyond-M1 option (see Alternatives).
 
-```
-("<provider name 1>" OR "<provider name 2>" OR ... OR "<alias>")
-OR (subscription OR renewal OR trial OR recurring OR billing OR invoice OR receipt)
--{<global exclusion list>}
-```
+- **OAuth direct inbox read** (CASA Tier 2 for Gmail, M365 App Certification at scale for Outlook). Worst technical posture (full mail read). Most-familiar perceived posture — users have granted this scope to many apps. Best for product capability (12-month backfill on connect). Deferred to Beyond M2 once paid base justifies the review cost.
 
-Provider names where the bare name is too generic to forward on alone (`Apple`, `Linear`, `Notion`, `Render`, `Modal` — common-word colliders) are excluded from the name path. The exact gating mechanism (a `safe_to_filter_alone boolean` on `products`, a curated subset list, or equivalent) is deferred to the implementation issue (#111). Colliders are still in the registry; they just don't earn standalone catch privileges, and rely on their receipts being caught by the generic-term path until the post-cutoff workflow can address them differently.
+For the wedge — engineers and operators who scrutinize permissions — forwarding's narrow technical posture is what makes the trust ask defensible. Crossing trust boundaries is reserved for downstream stages where the capability gain has been validated against the larger trust ask.
 
-The initial generic-term set deliberately includes `billing`, `invoice`, and `receipt` despite known bleed into personal-sub and one-time-purchase mail. The recall-first principle dominates here: a weird provider using only billing vocabulary needs to be discoverable, and the parse cost of personal-sub false positives is acceptable.
+### 2. Filter architecture — split-filter (detection + discovery)
 
-### 3. Two-cutoff narrowing as the evolution path
+The forwarding filter does two structurally different jobs, and the architecture splits them rather than pooling them:
 
-Two distinct cutoff events progressively narrow the filter, each evidence-triggered and individually reversible.
+- **Detection filter** — catches mail from *known* providers when the user has an active subscription. Driven by provider names (and aliases) from the `products` registry. High volume. Precision via the downstream matcher (resolves to known subscriptions; dedups by `dedupe_key`).
+- **Discovery filter** — surfaces mail from *unknown* providers, just enough to add them to the registry. Driven by a small SaaS-vocabulary keyword set. Low volume. Precision via dogfood review and registry expansion.
 
-**Cutoff A** — drop `billing`, `invoice`, `receipt` from the generic-term set. These are the highest-bleed terms (matched by Netflix invoices, Etsy purchase receipts, utility bills, Amazon shipping confirmations). The remaining four terms — `subscription`, `renewal`, `trial`, `recurring` — bias toward SaaS vocabulary and away from personal-purchase noise. Triggered when observation shows the three broad terms are net-negative on inbound matched *only* via that path (no name hit, no other generic-term hit).
+Pooling them as a single filter would conflate two structurally different jobs: discovery noise pollutes detection metrics; broad terms waste matcher effort on receipts that should have been name-matched; cutoff-narrowing decisions can't be reasoned about per channel. Splitting makes each channel's purpose legible at the rule level and the cutoff story (§8) cleaner.
 
-**Cutoff B** — drop all generic terms. Filter becomes a strict provider-name whitelist. New providers enter the catalog only by explicit user action: manual forward of a first receipt, in-app card creation (which would require reopening ADR-0003's manual-add exclusion as a separate evidence-driven decision), or by SubSounder adding the provider to the global registry. Triggered when the catalog has reached coverage such that new-provider discovery through the keyword-catch path is dominated by user-initiated paths.
+**Observability is content-side, not filter-side.** Channel attribution is inferred at parser time from the inbound mail content against the current registry — did this mail come from a provider on the detection list, or only match the discovery vocabulary? Inference works on what arrived, not on metadata embedded by the rule, which makes it robust to filter-state opacity and user mutation (§7). Telemetry for the §8 cutoff and the §5 exclusion-list growth uses content-side signals plus catalog-source distribution, not filter metadata.
 
-Threshold numbers for both cutoffs are deliberately not pinned in this ADR — the data to set them honestly does not yet exist. What is pinned is the **mechanism**: per-keyword-path observability of parser outcomes on `inbound_receipts` plus `parser_runs` plus matched `subscriptions`. Each forwarded receipt's matching path is recorded; aggregated parser-status distribution per path tells us when a keyword is no longer earning its keep. Implementation of this telemetry is part of the cutoff-A work, not deferred to "when we need it" — without the telemetry the cutoffs become "we will get to it" decisions that drift.
+### 3. Generic-term set — SaaS vocabulary only
 
-### 4. Exclusion list as the precision lever during the recall-first era
+The discovery filter's generic terms: `subscription`, `renewal`, `trial`, `recurring`.
 
-False-positive senders observed during dogfood and alpha (personal-sub providers that consistently misfire; marketing senders the LLM repeatedly rejects) feed a global exclusion list rendered into the filter as `-from:`. This is the precision lever before cutoff A: it narrows the false-positive surface without sacrificing recall on the name path.
+Explicitly excluded from day one: `billing`, `invoice`, `receipt`. The excluded terms are dominated by commerce mail for the wedge ICP — Shopify orders, Etsy purchases, Amazon shipping confirmations, conference tickets, cloud-usage notices, hardware orders, B2B receipts. For this user base the false-positive volume would drown the useful subscription signals at three levels: parser cost (smallest concern), onboarding perception (a user reviewing what's been forwarded should see plausible subscription mail, not their last Etsy order), and signal-to-noise of any review surface downstream.
 
-Maintenance: manual review during dogfood and alpha, with LLM-suggested candidates (senders the parser has rejected ≥N times across pods) added to the review surface post-M1. Exclusions are pod-agnostic — a personal-sub sender excluded by one user's observation benefits all wedge users, preserving the registry-compounding effect ADR-0005 named. Per-pod overrides remain possible if the no-bleed assumption breaks at the margin, but they are not v1.
+The position is start narrow by design; expand on evidence only if dogfood shows we're missing subscription signals because billing/invoice/receipt was the only catch path. Burden of proof on inclusion, not exclusion.
 
-Storage shape (a `forwarding_exclusions` table, a JSON column on a config row, or rendered into `seed.sql` initially) is deferred to the implementation issue. The decision pinned here is that the exclusion list is **a thing the registry maintains, pod-agnostic, observability-driven**.
+### 4. Provider names — registry-derived, collider-aware
 
-### 5. Server-side rendering, pulled on demand
+The detection filter's provider list is derived server-side from the `products` registry. Implementation specifics (which column drives the filter list, the gating mechanism for common-word colliders like `Apple` / `Linear` / `Notion`) are deferred to the implementation issue (#111).
 
-The Gmail `filters.xml` is rendered server-side at request time at `/api/gmail-filters/[pod_id]` (or equivalent — endpoint shape per #111). Users download and import via Gmail's native filter-import flow. No client-side rendering, no cron-pushed updates, no per-user filter customization — every pod gets the same registry-derived filter at a given moment.
+Open schema question: should the registry compile filter terms at the **provider** level (`Adobe`, `Google`) or **product** level (`Photoshop`, `Lightroom`, `Acrobat`)? Provider-level catches all Adobe mail whether the user has Photoshop or not — over-recalls in a way the matcher dedups but feels noisier to the user. Product-level is more precise but costs filter-budget faster. The answer may differ per channel (detection vs discovery). Tracked at [#114](https://github.com/udog21/subsounder/issues/114).
 
-Users are prompted to re-import after material registry changes: post-cutoff-A activation, after meaningful exclusion-list additions, when the provider list grows enough to materially affect catch rate. The re-import prompt is informational, not a precondition — a stale filter still works, just less precisely than current.
+### 5. Exclusion list — global, registry-maintained, observability-driven
 
-The registry-layer / delivery-layer separation matters here: the same `products` registry that drives Gmail `filters.xml` can drive Outlook rules (#61's domain), browser-extension forwarders (Beyond M2), and post-CASA OAuth-managed filter installation. Provider-intelligence work compounds across delivery mechanisms without re-derivation.
+False-positive senders observed during dogfood and alpha feed a global, pod-agnostic exclusion list. Exclusions compound across pods via the registry — a personal-sub sender excluded by one user's observation benefits all wedge users.
 
-### 6. Out-of-catalog provider workflow (post-cutoff-B)
+**Granularity caveat**: a blanket `-from:X` exclusion silently drops *all* mail from that sender, including useful signals from senders with mixed streams (a provider that sends both personal-purchase receipts and subscription renewal notices). Exclusions may need to grow finer than blanket sender filters — `from:X AND subject:Y` patterns, or per-class exclusions wired to observed parser outcomes. The exact granularity model is deferred to the implementation layer, but the constraint is recorded here so the simple-sender exclusion design doesn't accumulate invisible false negatives.
 
-Once the filter is whitelist-only, a user signing up for a tool not yet in the catalog has three paths:
+Storage shape (table, JSON column, seed file), maintenance discipline, and LLM-suggested-candidate review surface deferred to implementation.
 
-- **Manual forward** of the first receipt — the parser still processes any received mail, this is the implicit path.
-- **In-app card creation** — currently rejected by [ADR-0003](0003-no-bank-connection-ingestion-strategy.md) on the grounds that manual-add defeats the helper purpose during the discovery era. Cutoff B shifts the product from passive-detect to active-curate, which materially changes the premise of that rejection. Reopening ADR-0003's manual-add exclusion is recorded here as a follow-up decision triggered by cutoff B, not pre-judged in this ADR.
+### 6. Delivery channel — asymmetric: Gmail XML, Outlook OAuth via Graph
+
+Delivery mechanisms are not symmetric across mail providers:
+
+- **Gmail** exposes a documented user-importable filter file (`filters.xml` via Settings → Filters → Import). One-action import, no OAuth, no installed software, no Google verification gate at our scale (the import flow is user-side, not API-mediated). Chosen for Gmail delivery.
+- **Modern Outlook** (outlook.com, outlook.office.com, M365 OWA) has no equivalent user-importable rule file format. Desktop Outlook supports `.rwz` (proprietary binary; the wedge audience is on web/OWA). The only programmatic install path is Microsoft Graph `messageRules`, scope `MailboxSettings.ReadWrite` (verified narrow: no message-content read implied, no folder access, only mailbox-settings read/write). Chosen for Outlook delivery.
+
+Asymmetric delivery is dominant over the alternatives (see Alternatives Considered):
+
+- *Symmetric XML import for both*: impossible — Outlook has no such format.
+- *Symmetric OAuth for both* (Gmail OAuth via `gmail.settings.basic` + Outlook Graph): Gmail OAuth is CASA Tier 2 gated; once that review is being paid for, direct ingest (Beyond M2) is strictly more valuable than filter-managed forwarding.
+- *Symmetric manual rule instructions*: Outlook's field-by-field rule UI plus single-line input for term lists makes copy-paste construction of a recall-first ruleset high-friction at the onboarding step. Acceptable as a dogfood stopgap, not a product surface.
+
+**Outlook delivery requires Microsoft Publisher Verification before alpha invites.** Risk-based step-up consent (Microsoft Entra, enabled by default on increasing share of work/school tenants) blocks unverified apps for scopes beyond basic sign-in, and `MailboxSettings.ReadWrite` qualifies. Publisher Verification is free, ~1 week wall-clock realistic, 2-3 weeks worst-case on Microsoft's CPP queue. Pre-alpha gate. Founder dogfood with personal MSA accounts (outlook.com) can proceed unverified (the warning appears but doesn't block consent).
+
+### 7. Filter state and user mutations
+
+Filter state is opaque to SubSounder on Gmail and partially observable on Outlook. After we render Gmail's `filters.xml` and the user imports it, we never see what's installed — Gmail provides no API surface for SubSounder to inspect or modify the user's filter rules. On Outlook the Graph `MailboxSettings.ReadWrite` scope grants read/write authority over inbox rules, so we can list, update, and delete rules we installed (and, in principle, any other rule — narrowness is enforced by our usage discipline, not by the scope).
+
+**Drift management follows directly from this asymmetry:**
+
+- **Gmail** — stale-tolerant. We render fresh XML on demand and prompt to re-import after material registry changes. Gmail's import is append-only — re-importing does not replace old rules — so stale ones accumulate and the user manages cleanup. Rule-name markers (e.g. `[SubSounder]`) help the user identify and remove SubSounder rules in their settings UI.
+- **Outlook** — actively reconciled. When the registry changes materially we re-push via Graph: identify our existing rules by marker, remove or update them, install the fresh set. No user-side cleanup needed.
+
+**User-initiated mutations are an accepted property of the system, not a failure mode.** The user owns their mailbox. They may delete one of our rules, edit its terms, add exceptions, or build their own forwarding rule to the alias.
+
+- On **Gmail** the mutation is undetectable from our side. If a rule's been deleted or narrowed, we just see fewer signals; graceful degradation. Content-side telemetry (§2) may flag "this provider's catch rate dropped" but cannot tell us why; recovery is user-side.
+- On **Outlook** the mutation is detectable via Graph. The reconciliation policy is to **surface, not overwrite** — if our installed rule has been edited or deleted, we notify the user and offer to restore, but we do not silently revert their changes. Silent reconciliation would be the kind of paternalism the wedge ICP rejects.
+
+Because filter state is unreliable as a substrate, all evidence-triggered decisions (§5 exclusion-list growth, §8 cutoff) work from content-side signals — inbound mail content against the current registry, plus catalog-source distribution — rather than from filter metadata. The system is observably correct on what arrives, not on what the filter ought to have caught.
+
+### 8. Cutoff evolution — one cutoff, and it's a category shift
+
+The discovery filter narrows on evidence: when registry coverage and user-initiated paths (manual forward of first receipt, in-app catalog edits) dominate new-provider discovery, the discovery filter's generic terms are dropped entirely. The detection filter persists; new providers enter the catalog only via explicit user action or via SubSounder adding them to the registry.
+
+**Crossing this cutoff is a category shift, not a precision refinement.** Pre-cutoff the product is "we discover what you have." Post-cutoff the product is "you tell us what you have and we watch it." That changes the magic-moment, the onboarding promise, the marketing copy, and the relationship between catalog completeness and user agency. Future product decisions should re-evaluate against the new category — not assume the old one carries through.
+
+The cutoff is evidence-triggered and reversible (re-add the generic terms if a measurable problem emerges). Trigger mechanism: content-side channel inference (§2) on inbound mail, combined with catalog-source distribution — e.g., "of net-new subscriptions added in the last N weeks, X% came from providers already on the detection list, only Y% came from discovery-only matches." When discovery-only matches no longer produce net-new providers worth their noise, the discovery filter sunsets. Threshold numbers deferred to the implementation issue; the mechanism (content-side, not filter-metadata) is pinned.
+
+### 9. Tenant-policy ceiling — accepted
+
+Microsoft 365 work tenants can disable external auto-forwarding at the tenant-policy level. Where disabled, the Graph-installed rule is created but the forward action doesn't fire. SubSounder's served population is explicitly scoped to: users with personal mail accounts, or with self-managed work accounts (the user is the tenant admin, or the tenant policy allows external forwarding). Locked-down enterprise inboxes are outside the served population.
+
+This is consistent with the ADR-0005 wedge — operators on modern stacks tend to control their own org or use personal accounts for personal SaaS spend. **Marketing implication**: landing-page copy is explicit about scope ("Works with personal Gmail and Outlook, or self-managed work accounts. Not designed for locked-down enterprise inboxes"). This filters out the segment we couldn't serve anyway and preserves trust with the segment we do.
+
+### 10. Out-of-catalog provider workflow (post-cutoff)
+
+Once the discovery filter is sunset (§8), a user signing up for a tool not yet in the registry has three paths:
+
+- **Manual forward** of the first receipt — the parser still processes any received mail; this is the implicit path.
+- **In-app card creation** — currently rejected by [ADR-0003](0003-no-bank-connection-ingestion-strategy.md) on the grounds that manual-add defeats the helper purpose during the discovery era. The post-cutoff state shifts the product from passive-detect to active-curate, which materially changes the premise of that rejection. Reopening ADR-0003's manual-add exclusion is recorded here as a follow-up decision triggered by the cutoff, not pre-judged in this ADR.
 - **Wait** for SubSounder to add the provider to the global registry via dogfood discovery, public-registry contribution, or alpha/beta user reports.
 
-Picking a default UX is deferred to the cutoff-B implementation moment. The option set is recorded here so it is not relitigated as a fresh question later.
+Picking a default UX is deferred to the cutoff implementation moment. The option set is recorded here so it is not relitigated as a fresh question later.
 
 ## Consequences
 
 **Positive:**
 
-- The filter catches all three signal classes ADR-0004 named (Class A billing, Class B identity+cadence, Class C silent-provider) plus trial confirmations from product subdomains and SaaS billed via payment-processor relays. The previously-considered domain-only shape would have missed each of those classes structurally, not just at the margin.
-- Recall-first / precision-via-LLM cleanly decouples filter design from parser design. The filter does not need to "know" what a subscription is — it surfaces plausible candidates; the LLM classifies.
-- The two-cutoff evolution gives a clear migration path from "discovery-leaning" (current) to "curated-catalog" (post-cutoff-B) without a one-time disruptive flip. Each cutoff is evidence-triggered and reversible — a premature cutoff can be undone by re-adding the keywords.
-- The exclusion list is a precision lever during the recall-first era that does not require user catalog discipline or per-user filter customization. Wins compound across pods via the global registry.
-- Server-side rendering from the registry (preserving ADR-0005's system-managed direction) means a new provider added to `products` improves every user's filter on the next refresh — provider-intelligence investment is a leveraged asset, not a per-user feature.
-- The registry-layer / delivery-layer separation keeps Outlook rules, browser-extension forwarders, and post-CASA OAuth filter installation as additive delivery channels rather than parallel mechanisms to maintain.
+- Trust boundary is the narrowest of the three options on the technical-access axis. Aligned with the wedge ICP's audit-and-uninstall expectations and consistent with ADR-0005 §3's "system-managed, user-controllable" intent. The trust framing is honest about asymmetry: zero mailbox access on Gmail, narrow mailbox-settings access on Outlook.
+- Split-filter architecture decouples two structurally different jobs (detection, discovery). Each evolves independently; cutoff decisions are reasoned about per channel; the discovery-channel sunset is a single legible move.
+- Dropping `billing`/`invoice`/`receipt` from day one preempts the dominant false-positive class (commerce mail) for the wedge ICP. Recall-first is preserved on the dimensions where it matters (SaaS vocabulary in discovery, provider names in detection).
+- Asymmetric delivery follows the trust boundary cleanly. Each mail provider's narrowest install path is used; no design is compromised by the other.
+- Microsoft Publisher Verification (CPP track) is free and faster than Gmail's CASA Tier 2; unlocks Outlook ingestion under a genuinely narrow scope (`MailboxSettings.ReadWrite`, verified against MS Graph docs to be the minimum-privileged permission for `messageRules`).
+- Marketing posture is honest: "personal accounts and self-managed work accounts" filters the unservable segment up front, preserving trust with the segment we serve.
+- Observability is content-side (§2, §7), robust to filter-state opacity and user mutation. Cutoff and exclusion-list decisions work on what arrives, not on what the filter ought to have caught — which is the only honest substrate given that Gmail filter state is opaque to us and both channels permit user mutation.
 
 **Negative:**
 
-- Higher LLM parse cost than the domain-narrowed alternative during the recall-first era. At dogfood and alpha volumes the cost is sub-dollar to low single-digit dollars per month; at post-public-beta scale the cost scales with inbound volume rather than user count, so the cutoff-A timing matters for cost as well as precision. Cost trajectory needs monitoring as part of the same telemetry that drives the cutoff decisions.
-- The cutoff thresholds are TBD-on-data, not pinned in this ADR. Risk: "we will get to it" drift if the observability instrumentation is not built or not watched. Mitigation: the observability mechanism is part of the implementation issue for cutoff A, not deferred to a future "when we are ready" issue.
-- The `safe_to_filter_alone` (or equivalent collider-name handling) introduces a per-product curation burden. Initial pass during the wedge provider seed work (#90 as rescoped); ongoing pass each time a provider is added. Acceptable burden given how few wedge providers have colliding names, but a maintenance cost.
-- The previously-planned `products.billing_domains[]` column (proposed in #110 under PR #109) is demoted from M1 — it is no longer the M1 filter input. It remains relevant as future infrastructure for post-cutoff-B closed-whitelist precision and for post-CASA OAuth-managed direct ingest. The work is not lost; it shifts to Phase 2 or Beyond M2.
+- Two filter rules per user on Gmail plus an OAuth flow on Outlook. Setup is slightly longer than a single-rule design — but each rule has a single coherent job, which helps user comprehension during setup.
+- Microsoft Publisher Verification is wall-clock-bound on Microsoft's review queue. Single point of dependency that can extend by weeks if Microsoft requests additional documentation. Pre-alpha critical path.
+- The cutoff framing has collapsed to a single sunset event. If evidence later suggests finer steps (drop one generic term but not all), the framework will need to re-decompose.
+- The cutoff is a category shift, not a precision tweak. Future product positioning must re-evaluate against the new category at trigger time. Underestimating this is the most expensive future mistake the ADR is structured to prevent.
+- Tenant-locked users (locked-down enterprise inboxes) are explicitly outside the served population. Smaller addressable market than a bank-connection or extension-based design — but consistent with the ADR-0005 wedge.
+- Filter-state opacity on Gmail means we cannot detect user mutation; if a user deletes or narrows our rule we just see reduced inbound signal, and the recovery path is user-side. Content-side telemetry can flag the symptom but not the cause.
+- Discovery-filter granularity question (provider-level vs product-level compilation) is acknowledged but unresolved. Tracked at [#114](https://github.com/udog21/subsounder/issues/114).
+- The Gmail XML filter has practical length limits (community-cited ~1500 chars per rule; ~2500-4000 sometimes accepted on import); the split-filter design plus multi-rule splitting within the XML keeps this from being a binding constraint at plausible registry sizes, but it is a constraint to keep in view as the registry grows.
 
 **Neutral:**
 
-- Doesn't change the parser or matcher. Both already handle the heterogeneous signal classes ADR-0004 named; the filter shape affects which signals reach them, not how they are processed.
-- Doesn't override ADR-0003 (no bank connection). Alternative ingestion channels (CSV onboarding backfill, welcome-email forwarding) remain orthogonal. Note the post-cutoff-B reopening pointer in §6 is a *flagged future trigger*, not an immediate change.
-- Doesn't override ADR-0004 (signal classes). Class C signals are explicitly cited in this ADR as the structural reason the filter must remain name-based during the recall-first era.
-- Refines but does not retire ADR-0005 §3. ADR-0005's strategic intent (system-managed forwarding rules, registry compounding, importable XML filters, future OAuth-managed installation) is preserved verbatim; only the mechanism specification is updated from "billing-domain-specific" to "name-driven with billing-domain narrowing as the post-cutoff-B state."
+- Parser and matcher unchanged. Filter architecture affects which signals reach them, not how they process.
+- Doesn't override [ADR-0003](0003-no-bank-connection-ingestion-strategy.md) (no bank connection) or [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md) (signal classes). The post-cutoff workflow flag for reopening ADR-0003's manual-add exclusion remains a flagged future trigger, not an immediate change.
+- Refines [ADR-0005](0005-wedge-icp-modern-software-stacks.md) §3. The strategic intent (system-managed forwarding, registry compounding, importable filters, future OAuth-managed installation) is preserved verbatim; the mechanism specification is updated from "name-based with billing-domain narrowing as the post-cutoff-B state" to "split-filter (detection + discovery) with asymmetric delivery (Gmail XML, Outlook Graph OAuth)."
 
 ## Alternatives Considered
 
-**Domain-only filter shape with `products.billing_domains[]` as the precondition.** The mechanism initially specified by PR #109. Rejected on signal-heterogeneity grounds: trial confirmations, welcome emails, and Class C silent-provider signals overwhelmingly arrive from non-billing subdomains, so a domain-only filter creates a blind spot exactly where high-value signals live. Domain-based remains the post-cutoff-B future state for closed-whitelist precision on known-clean billing senders, but as a complement to name-based catch, not a replacement.
+**Single-filter design with provider names plus broad generic terms.** Rejected on conflation grounds (§2): detection and discovery are structurally different jobs with different volume profiles and precision needs. Pooling them obscures the cutoff narrative and degrades both signals. Split-filter cleanly addresses this.
 
-**Precision-first filter (high-precision rule plus a small catalog).** Rejected because asymmetric failure cost (missed positive ≫ parse cost) makes recall-first dominant. The LLM is already the precision layer; sacrificing recall in the filter to "save on parse cost" trades a user-visible failure mode for a back-end cost optimization, which is the wrong direction.
+**Including `billing`, `invoice`, `receipt` in the discovery filter.** Rejected on §3 grounds: commerce-mail volume for the wedge ICP would drown subscription signals — not just at parser-cost level but at user-perception level (forwarding rule feels invasive when its catches are mostly unrelated commerce mail). Re-adding on evidence is straightforward; pruning under noise is harder.
 
-**Single-cutoff evolution (one flip from "broad keywords plus names" to "names only").** Rejected as too disruptive and as denying useful intermediate evidence. The two-cutoff design lets the highest-bleed terms (`billing`, `invoice`, `receipt`) sunset on their own observation evidence before the harder decision about the SaaS-vocabulary terms (`subscription`, `renewal`, `trial`, `recurring`) is forced. Two evidence checkpoints, two reversible decisions.
+**Per-filter forwarded-mail attribution as the observability substrate.** Considered as a way to track which rule caught which mail, with version markers on rules supporting cutoff evidence accumulation over time. Rejected because filter state is opaque on Gmail (we can't verify what's installed) and mutable by the user on both channels — building telemetry on filter-side metadata would be elaborate scaffolding over genuinely unreliable signal. Content-side channel inference (§2) replaces it: more honest, more robust, simpler.
 
-**Per-pod filter exclusions instead of global.** Rejected because per-pod exclusions fork the registry-compounding effect ADR-0005 named — a personal-sub sender excluded by one user's observation should benefit all wedge users by default. Per-pod overrides remain available as a fallback if the no-bleed assumption breaks for a specific cohort, but they are not v1.
+**Symmetric XML-download-and-import for Gmail and Outlook.** Implicit in PR #109's framing. Rejected: modern Outlook has no equivalent user-importable rule format. `filters.xml` is Gmail-specific. Treating them as parallel constrains the Gmail design against an Outlook limitation that has no actual mechanism behind it.
 
-**OAuth-managed filter installation as the M1 shape (server pushes filter updates to user's Gmail via `gmail.settings.basic`).** Considered, then ruled out: `gmail.settings.basic` is a Restricted scope and shares CASA Tier 2 review with `gmail.readonly`. Once that review is being paid for, direct ingest (shape 5 in the PR #109 conversation) is a strictly more valuable product (12-month backfill on connect). Deferred to Beyond M2 per ADR-0005's framing of CASA Tier 2 work — both shapes share the same gate, and the choice between them is a Phase 2 alpha-survey question.
+**Symmetric OAuth for both platforms (`gmail.settings.basic` + Microsoft Graph).** `gmail.settings.basic` is CASA Tier 2 gated. Once that review is being paid for, direct ingest via `gmail.readonly` + Pub/Sub watch (12-month backfill on connect) is strictly more valuable than OAuth-managed filter installation. Deferred to Beyond M2 per ADR-0005's framing of CASA Tier 2 work.
 
-**LLM-suggested keyword evolution as the cutoff mechanism.** Considered — feed the LLM samples of forwarded mail and ask it to recommend keyword changes. Rejected as v1 because the per-keyword-path parser-outcome observability gives a transparent, auditable signal that an LLM-recommendation loop would not. LLM-suggested exclusion-list additions (a smaller, lower-stakes decision than keyword evolution) remain in scope as a downstream enhancement (Decision §4).
+**Manual rule instructions for both platforms (copy-paste from server-rendered guides).** Acceptable for dogfood as a temporary stopgap before Microsoft Publisher Verification lands. Rejected as a launch product surface: Outlook's field-by-field rule UI plus single-line input for term lists makes copy-paste construction of a recall-first ruleset high-friction at exactly the onboarding step where new-user trust is most fragile.
+
+**Browser extension covering both platforms (max-transparency composition: open source, read-nothing write-only, use-once-and-uninstall, MV3 optional-host-permissions).** Cross-platform UX is appealing. Rejected on three grounds: (a) trust posture (broad `host_permissions` on mail domains) is less defensible than forwarding's narrow technical posture for the wedge ICP, even with full transparency mitigations; (b) fragility against Gmail/Outlook web UI redesigns, plus Web Store review lag on each release; (c) engineering and maintenance burden disproportionate to the alternative (Microsoft Graph + Gmail XML). Reserved as a Beyond-M1 option if alpha telemetry reveals OAuth-revocation as a real failure mode, or if mobile-onboarding coverage becomes meaningful for the ICP.
+
+**Silent server-side reconciliation of user-edited Outlook rules.** Considered as the Outlook drift-management policy: when Graph reads back a SubSounder rule whose terms have been mutated by the user, silently overwrite to restore canonical. Rejected on §7 grounds: silent overwrite of user-edited rules is the kind of paternalism the wedge ICP rejects; mutations are an accepted system property, not a failure mode. The policy is surface-and-offer-restore, not silent-reconcile.
+
+**Per-pod filter exclusions instead of global.** Rejected: forks the registry-compounding effect ADR-0005 named. A personal-sub sender excluded by one user's observation should benefit all wedge users by default. Per-pod overrides remain available as a fallback at the margin.
+
+**LLM-suggested keyword evolution as the cutoff mechanism.** Content-side channel inference (§2, §7-8) gives a transparent, auditable signal that an LLM-recommendation loop would not. LLM-suggested exclusion-list additions (a smaller, lower-stakes decision than keyword evolution) remain in scope as a downstream enhancement (§5).
+
+**Domain-only filter shape with `products.billing_domains[]` as the precondition (PR #109's original mechanism).** Rejected on signal-heterogeneity grounds: trial confirmations, welcome emails, and Class C silent-provider signals overwhelmingly arrive from non-billing subdomains. Domain-based remains relevant as future infrastructure for post-cutoff closed-whitelist precision and for post-CASA OAuth-managed direct ingest. The work is not lost; it shifts to Phase 2 or Beyond M2.
