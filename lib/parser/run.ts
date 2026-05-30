@@ -263,40 +263,67 @@ export async function runParse(receipt_id: string, pod_id: string): Promise<RunP
       let cancellationUrl: string | null = null
       let cancellationDifficulty: number | null = null
 
-      if (signal.provider_domain) {
-        const domain = signal.provider_domain.toLowerCase()
-        // For multi-product providers (Adobe Photoshop vs Adobe Lightroom), the
-        // signal's `product` discriminates. For single-product providers (Spotify,
-        // Netflix), product is null and we fall back to provider_name so we still
-        // find or create the right products row.
-        const productName = signal.product ?? signal.provider_name ?? domain
-        const { data: product } = await supabase
-          .from('products')
+      const providerName = signal.provider_name ?? signal.provider_domain ?? null
+      if (providerName) {
+        let providerId: string | null = null
+        const { data: provider } = await supabase
+          .from('providers')
           .select('id, cancellation_url, cancellation_difficulty')
-          .eq('website', domain)
-          .ilike('name', productName)
+          .ilike('name', providerName)
           .maybeSingle()
 
-        if (product) {
-          productId = product.id
-          cancellationUrl = product.cancellation_url
-          cancellationDifficulty = product.cancellation_difficulty
+        if (provider) {
+          providerId = provider.id
+          cancellationUrl = provider.cancellation_url
+          cancellationDifficulty = provider.cancellation_difficulty
         } else {
-          const { data: newProduct, error: productInsertError } = await supabase
-            .from('products')
+          const { data: newProvider, error: providerInsertError } = await supabase
+            .from('providers')
             .insert({
-              name: productName,
-              provider_name: signal.provider_name ?? domain,
-              website: domain,
+              name: providerName,
+              website: signal.provider_domain?.toLowerCase() ?? null,
               enrichment_status: 'pending',
             })
             .select('id')
             .single()
-          if (productInsertError) {
-            writeErrors.push(`product_insert_failed: ${productInsertError.message}`)
-            console.error('[run-parse] product insert error:', productInsertError)
+          if (providerInsertError) {
+            writeErrors.push(`provider_insert_failed: ${providerInsertError.message}`)
+            console.error('[run-parse] provider insert error:', providerInsertError)
           }
-          if (newProduct) productId = newProduct.id
+          if (newProvider) providerId = newProvider.id
+        }
+
+        // For multi-product providers (Adobe Photoshop vs Adobe Lightroom), the
+        // signal's `product` discriminates. For single-product providers (Spotify,
+        // Netflix), product is null and we fall back to provider_name so we still
+        // find or create the right products row.
+        if (providerId) {
+          const productName = signal.product ?? signal.provider_name ?? signal.provider_domain ?? providerName
+          const { data: product } = await supabase
+            .from('products')
+            .select('id')
+            .eq('provider_id', providerId)
+            .ilike('name', productName)
+            .maybeSingle()
+
+          if (product) {
+            productId = product.id
+          } else {
+            const { data: newProduct, error: productInsertError } = await supabase
+              .from('products')
+              .insert({
+                provider_id: providerId,
+                name: productName,
+                enrichment_status: 'pending',
+              })
+              .select('id')
+              .single()
+            if (productInsertError) {
+              writeErrors.push(`product_insert_failed: ${productInsertError.message}`)
+              console.error('[run-parse] product insert error:', productInsertError)
+            }
+            if (newProduct) productId = newProduct.id
+          }
         }
       }
 
