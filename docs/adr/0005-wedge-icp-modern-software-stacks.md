@@ -1,9 +1,9 @@
 # ADR-0005: Wedge ICP — subscription intelligence for modern software stacks
 
-- **Status:** Accepted
+- **Status:** Accepted; §3 mechanism refined by [ADR-0006](0006-forwarding-ingestion-filter-shape.md)
 - **Date:** 2026-05-28
 - **Deciders:** Lek
-- **Related:** [docs/market-and-positioning.md](../market-and-positioning.md), [docs/active/ROADMAP.md](../active/ROADMAP.md), [ADR-0003](0003-no-bank-connection-ingestion-strategy.md), [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md), PR #89 (positioning rewrite), PR #93 (Phase 1 / Phase 2 reshape), PR #107 (in-codebase landing for stack-operator audience)
+- **Related:** [docs/market-and-positioning.md](../market-and-positioning.md), [docs/active/ROADMAP.md](../active/ROADMAP.md), [ADR-0003](0003-no-bank-connection-ingestion-strategy.md), [ADR-0004](0004-silent-provider-signals-classes-and-sonar-bench.md), [ADR-0006](0006-forwarding-ingestion-filter-shape.md), PR #89 (positioning rewrite), PR #93 (Phase 1 / Phase 2 reshape), PR #107 (in-codebase landing for stack-operator audience)
 - **Retires:** the undifferentiated "subscription spender" framing as the M0–M2 target
 
 ## Context
